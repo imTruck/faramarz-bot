@@ -46,8 +46,8 @@ export default {
       });
     }
 
-    // ۲. مسیر داشبورد وب (/admin)
-    if (url.pathname === "/admin" && request.method === "GET") {
+    // ۲. مسیر صفحه راه‌اندازی و داشبورد تحت وب (/admin یا /setup یا /)
+    if ((url.pathname === "/admin" || url.pathname === "/setup" || url.pathname === "/") && request.method === "GET") {
       let kvWorking = false;
       try {
         if (env.KV_STORAGE) {
@@ -66,7 +66,57 @@ export default {
       });
     }
 
-    // ۳. پردازش درخواست‌های Webhook تلگرام (POST /)
+    // ۳. پردازش فرم ذخیره خودکار کلیدها و ست کردن اتوماتیک وِبهوک (POST /setup)
+    if ((url.pathname === "/setup" || url.pathname === "/admin") && request.method === "POST") {
+      try {
+        const formData = await request.formData();
+        const botTokenInput = formData.get("bot_token")?.trim();
+        const geminiKeyInput = formData.get("gemini_key")?.trim();
+
+        let message = "";
+
+        if (botTokenInput) {
+          await storage.setBotToken(botTokenInput);
+          // فعال‌سازی خودکار وِبهوک تلگرام از طریق خود ورکر
+          const webhookUrl = `${url.origin}/`;
+          const webhookRes = await fetch(`https://api.telegram.org/bot${botTokenInput}/setWebhook?url=${encodeURIComponent(webhookUrl)}`);
+          const webhookData = await webhookRes.json();
+          
+          if (webhookData.ok) {
+            message += `✅ توکن تلگرام با موفقیت در KV ذخیره شد و <b>وبهوک تلگرام به طور خودکار فعال گردید</b>!<br>`;
+          } else {
+            message += `✅ توکن ذخیره شد ولی ست کردن وبهوک با خطا مواجه شد: ${webhookData.description}<br>`;
+          }
+        }
+
+        if (geminiKeyInput) {
+          await storage.setGeminiKey(geminiKeyInput);
+          message += `✅ کلید Gemini API با موفقیت در KV ذخیره شد!<br>`;
+        }
+
+        message += `🎉 ربات فرامرز اکنون آماده است. وارد تلگرام شوید و با ربات صحبت کنید.`;
+
+        const hasToken = !!(await storage.getBotToken());
+        const hasGemini = !!(await storage.getGeminiKey());
+        const primaryModel = await storage.getPrimaryModel();
+
+        const html = renderAdminDashboard({
+          primaryModel,
+          hasToken,
+          hasGemini,
+          kvWorking: true,
+          message
+        });
+
+        return new Response(html, {
+          headers: { "Content-Type": "text/html; charset=utf-8" }
+        });
+      } catch (err) {
+        return new Response(`خطا در ذخیره اطلاعات: ${err.message}`, { status: 500 });
+      }
+    }
+
+    // ۴. پردازش درخواست‌های Webhook تلگرام (POST /)
     if (request.method === "POST") {
       try {
         const update = await request.json();

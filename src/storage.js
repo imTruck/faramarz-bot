@@ -2,26 +2,37 @@ import { CONFIG } from './config.js';
 
 export class StorageService {
   constructor(env) {
-    this.kv = env.KV_STORAGE;
-    this.env = env;
+    this.kv = env?.KV_STORAGE;
+    this.env = env || {};
   }
 
-  // دریافت توکن تلگرام با اولویت اول KV و سپس ENV
+  // دریافت توکن تلگرام با اولویت اول KV و سپس تمام نام‌های ممکن متغیرهای محیطی
   async getBotToken() {
     if (this.kv) {
       const token = await this.kv.get("bot:token");
       if (token && token.trim() !== "") return token.trim();
     }
-    return this.env?.BOT_TOKEN ? this.env.BOT_TOKEN.trim() : null;
+    const envToken = this.env.BOT_TOKEN || 
+                     this.env.TELEGRAM_BOT_TOKEN || 
+                     this.env.TELEGRAM_TOKEN || 
+                     this.env.TOKEN || 
+                     this.env.bot_token ||
+                     this.env.telegram_bot_token;
+    return envToken ? String(envToken).trim() : null;
   }
 
-  // دریافت کلید Gemini با اولویت اول KV و سپس ENV
+  // دریافت کلید Gemini با اولویت اول KV و سپس تمام نام‌های ممکن متغیرهای محیطی
   async getGeminiKey() {
     if (this.kv) {
       const key = await this.kv.get("gemini:key");
       if (key && key.trim() !== "") return key.trim();
     }
-    return this.env?.GEMINI_API_KEY ? this.env.GEMINI_API_KEY.trim() : null;
+    const envKey = this.env.GEMINI_API_KEY || 
+                   this.env.GEMINI_KEY || 
+                   this.env.GEMINI || 
+                   this.env.gemini_api_key ||
+                   this.env.gemini_key;
+    return envKey ? String(envKey).trim() : null;
   }
 
   // دریافت مدل پیش‌فرض/فعال
@@ -30,26 +41,26 @@ export class StorageService {
       const model = await this.kv.get("config:primary_model");
       if (model && model.trim() !== "") return model.trim();
     }
-    return this.env?.DEFAULT_GEMINI_MODEL || CONFIG.GEMINI_MODELS[0].id;
+    return this.env.DEFAULT_GEMINI_MODEL || CONFIG.GEMINI_MODELS[0].id;
   }
 
-  // تنظیم کلید Gemini
+  // تنظیم کلید Gemini در KV
   async setGeminiKey(key) {
     if (!this.kv) return "خطا: KV متصل نیست";
     if (key.toLowerCase() === "off") {
       await this.kv.delete("gemini:key");
-      return "کلید اختصاصی Gemini حذف شد و به حالت env برگشت.";
+      return "کلید اختصاصی Gemini حذف شد.";
     }
     await this.kv.put("gemini:key", key.trim());
     return key.slice(0, 6) + "..." + key.slice(-4);
   }
 
-  // تنظیم توکن تلگرام
+  // تنظیم توکن تلگرام در KV
   async setBotToken(token) {
     if (!this.kv) return "خطا: KV متصل نیست";
     if (token.toLowerCase() === "off") {
       await this.kv.delete("bot:token");
-      return "توکن تلگرام از KV حذف شد.";
+      return "توکن تلگرام حذف شد.";
     }
     await this.kv.put("bot:token", token.trim());
     return token.slice(0, 6) + "..." + token.slice(-4);
