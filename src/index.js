@@ -52,7 +52,7 @@ export default {
           primary_model: primaryModel
         },
         telegram_webhook: tgWebhookInfo,
-        version: "2.1.0-cloudflare-esm"
+        version: "2.2.0-fast-edge"
       }, null, 2), {
         headers: { "Content-Type": "application/json; charset=utf-8" }
       });
@@ -78,7 +78,7 @@ export default {
       });
     }
 
-    // ۳. پردازش فرم تحت وب راه‌اندازی (فقط POST به /setup یا Form Data)
+    // ۳. پردازش فرم تحت وب راه‌اندازی (POST /setup)
     if ((url.pathname === "/setup" || contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data")) && request.method === "POST") {
       try {
         const formData = await request.formData();
@@ -92,7 +92,6 @@ export default {
           const cleanToken = botTokenInput.replace(/^bot/i, "").trim();
           await storage.setBotToken(cleanToken);
 
-          // تنظیم خودکار وِبهوک تلگرام
           const webhookUrl = `${url.origin}/`;
           const tgWebhookUrl = `https://api.telegram.org/bot${cleanToken}/setWebhook`;
           
@@ -111,7 +110,7 @@ export default {
               message += `⚠️ خطا در ست کردن وبهوک تلگرام: <code>${webhookData.description}</code><br>`;
             }
           } catch (netErr) {
-            message += `⚠️ خطا در برقراری ارتباط با سرور تلگرام: ${netErr.message}<br>`;
+            message += `⚠️ خطا در ارتباط با تلگرام: ${netErr.message}<br>`;
           }
         }
 
@@ -121,7 +120,7 @@ export default {
         }
 
         if (isSuccess) {
-          message += `🎉 <b>تبریک! ربات فرامرز اکنون آماده است. وارد تلگرام شوید و دستور /start را بفرستید.</b>`;
+          message += `🎉 <b>تبریک! ربات فرامرز آماده است. وارد تلگرام شوید و دستور /start را بفرستید.</b>`;
         }
 
         const hasToken = !!(await storage.getBotToken());
@@ -140,7 +139,7 @@ export default {
           headers: { "Content-Type": "text/html; charset=utf-8" }
         });
       } catch (err) {
-        return new Response(`خطا در ذخیره اطلاعات: ${err.message}`, { status: 500 });
+        return new Response(`خطا: ${err.message}`, { status: 500 });
       }
     }
 
@@ -160,13 +159,9 @@ export default {
         const imageService = new ImageService(storage);
         const groupService = new GroupService(env.KV_STORAGE);
 
-        // تابع ارسال پیام به تلگرام با هندل خطاهای احتمالی پارس‌مود
+        // ارسال پیام با مدیریت خودکار پارس‌مود
         const sendTgMessage = async (chatId, text, replyMarkup = null, parseMode = "Markdown") => {
-          const payload = {
-            chat_id: chatId,
-            text,
-            reply_markup: replyMarkup
-          };
+          const payload = { chat_id: chatId, text, reply_markup: replyMarkup };
           if (parseMode) payload.parse_mode = parseMode;
 
           let res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -175,7 +170,6 @@ export default {
             body: JSON.stringify(payload)
           });
 
-          // اگر تلگرام به علت خطای Markdown پیام را ریجکت کرد، بدون Markdown بفرست
           if (!res.ok) {
             delete payload.parse_mode;
             await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -186,6 +180,15 @@ export default {
           }
         };
 
+        // ارسال سریع وضعیت "در حال نوشتن..."
+        const sendTyping = (chatId) => {
+          fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId, action: "typing" })
+          }).catch(() => {});
+        };
+
         // --- پردازش Callback Queries (دکمه‌های اینلاین) ---
         if (update.callback_query) {
           const cb = update.callback_query;
@@ -193,7 +196,6 @@ export default {
           const chatId = cb.message.chat.id;
           const userId = cb.from.id;
 
-          // بررسی انتخاب سطح تحقیق
           if (data.startsWith("research_tier:")) {
             const tier = data.split(":")[1];
             await storage.setState(userId, `waiting_research:${tier}`);
@@ -219,7 +221,6 @@ export default {
             return new Response("OK");
           }
 
-          // پردازش پنل ادمین
           await admin.handleCallback(cb, botToken);
           return new Response("OK");
         }
@@ -232,19 +233,16 @@ export default {
         const isGroup = message.chat.type === "group" || message.chat.type === "supergroup";
         const senderName = message.from.first_name || "رفیق";
 
-        // ثبت اطلاعات هویتی کاربر
-        await storage.saveUserIdentity(message.from);
+        // ثبت غیرمسدودکننده هویت
+        storage.saveUserIdentity(message.from).catch(() => {});
 
-        // مدیریت گروه‌ها: فیلتر پیام‌ها
         if (isGroup) {
-          await groupService.trackGroupMember(chatId, message.from);
+          groupService.trackGroupMember(chatId, message.from).catch(() => {});
           const shouldReply = groupService.shouldRespondInGroup(message, CONFIG.BOT_USERNAME);
-          if (!shouldReply) {
-            return new Response("OK");
-          }
+          if (!shouldReply) return new Response("OK");
         }
 
-        // --- بررسی استیکر (ارسال Reaction بدون بار پردازشی) ---
+        // استیکر
         if (message.sticker) {
           const reactionEmoji = imageService.getRandomStickerReaction();
           await fetch(`https://api.telegram.org/bot${botToken}/setMessageReaction`, {
@@ -261,63 +259,55 @@ export default {
 
         const text = message.text || message.caption || "";
 
-        // --- دستورات ویژه مالک (Admin Only) ---
+        // دستورات ادمین
         if (text.startsWith("/admin")) {
           if (!admin.isAdmin(userId)) {
-            await sendTgMessage(chatId, "⛔ **دسترسی غیرمجاز:** این بخش منحصراً برای مالک ربات است.");
+            await sendTgMessage(chatId, "⛔ دسترسی غیرمجاز.");
             return new Response("OK");
           }
           await admin.sendAdminPanel(chatId, botToken);
           return new Response("OK");
         }
 
-        if (text.startsWith("/settoken")) {
-          if (!admin.isAdmin(userId)) return new Response("OK");
+        if (text.startsWith("/settoken") && admin.isAdmin(userId)) {
           const parts = text.split(/\s+/);
-          if (!parts[1]) {
-            await sendTgMessage(chatId, "فرمت: `/settoken <توکن>` یا `/settoken off`");
-            return new Response("OK");
+          if (parts[1]) {
+            const masked = await storage.setBotToken(parts[1]);
+            await sendTgMessage(chatId, `✅ توکن ربات ذخیره شد: \`${masked}\``);
           }
-          const masked = await storage.setBotToken(parts[1]);
-          await sendTgMessage(chatId, `✅ **توکن ربات به‌روزرسانی شد:** \`${masked}\``);
           return new Response("OK");
         }
 
-        if (text.startsWith("/setgemini")) {
-          if (!admin.isAdmin(userId)) return new Response("OK");
+        if (text.startsWith("/setgemini") && admin.isAdmin(userId)) {
           const parts = text.split(/\s+/);
-          if (!parts[1]) {
-            await sendTgMessage(chatId, "فرمت: `/setgemini <کلید>` یا `/setgemini off`");
-            return new Response("OK");
+          if (parts[1]) {
+            const masked = await storage.setGeminiKey(parts[1]);
+            await sendTgMessage(chatId, `✅ کلید Gemini ذخیره شد: \`${masked}\``);
           }
-          const masked = await storage.setGeminiKey(parts[1]);
-          await sendTgMessage(chatId, `✅ **کلید Gemini به‌روزرسانی شد:** \`${masked}\``);
           return new Response("OK");
         }
 
-        // --- بررسی وضعیت کاربر (State - مثلاً تحقیق ۳ سطحی) ---
+        // بررسی حالت تحقیق
         const userState = await storage.getState(userId);
         if (userState && userState.startsWith("waiting_research:")) {
           const tier = userState.split(":")[1];
           await storage.clearState(userId);
-
-          await sendTgMessage(chatId, "🔬 **در حال تحقیق و بررسی عمیق منابع... لطفاً چند لحظه صبر کنید.**");
+          sendTyping(chatId);
 
           const researchResult = await chat.executeResearch(chatId, userId, text, tier);
           let responseText = researchResult.text;
           if (researchResult.sources && researchResult.sources.length > 0) {
-            responseText += "\n\n📚 **منابع و مراجع:**\n" + researchResult.sources.map(s => `• [${s.title}](${s.url})`).join("\n");
+            responseText += "\n\n📚 **منابع:**\n" + researchResult.sources.map(s => `• [${s.title}](${s.url})`).join("\n");
           }
 
           await sendTgMessage(chatId, responseText);
           return new Response("OK");
         }
 
-        // --- بررسی پردازش تصویر (Photo) ---
+        // پردازش تصویر
         if (message.photo && message.photo.length > 0) {
+          sendTyping(chatId);
           const photo = message.photo[message.photo.length - 1];
-          await sendTgMessage(chatId, "🖼 در حال دریافت و تحلیل تصویر...");
-
           try {
             const { dataUri, prompt } = await imageService.processTelegramPhoto(photo.file_id, message.caption);
             const primaryModel = await storage.getPrimaryModel();
@@ -329,13 +319,16 @@ export default {
           return new Response("OK");
         }
 
-        // --- بررسی دستورات استاندارد (/start, /price, ...) ---
+        // دستورات
         if (text.startsWith("/")) {
           const handled = await commands.handleCommand(chatId, userId, text, senderName, botToken);
           if (handled) return new Response("OK");
         }
 
-        // --- چت متنی هوشمند با پروتکل جستجو و حافظه ---
+        // ارسال اکشن در حال تایپ به تلگرام
+        sendTyping(chatId);
+
+        // پاسخگویی چت متنی
         if (text) {
           const chatResult = await chat.processMessage(chatId, userId, text, senderName);
           let replyText = chatResult.text;
@@ -348,7 +341,6 @@ export default {
 
         return new Response("OK");
       } catch (error) {
-        await storage.addLog(`Webhook processing error: ${error.message}`);
         return new Response(`Error: ${error.message}`, { status: 200 });
       }
     }
