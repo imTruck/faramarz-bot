@@ -8,19 +8,11 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
     throw new Error("کلید Gemini تنظیم نشده است.");
   }
 
-  // مدل‌های رسمی و فوق‌سریع تایید شده گوگل
-  const provenModels = [
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-pro"
-  ];
-
-  const primary = model || provenModels[0];
+  // چیدمان دقیق زنجیره مدل‌ها بر اساس اولویت کاربر
+  const primary = model || CONFIG.DEFAULT_FALLBACK_CHAIN[0];
   const candidateModels = [
     primary,
-    ...provenModels.filter(m => m !== primary),
-    ...CONFIG.DEFAULT_FALLBACK_CHAIN.filter(m => m !== primary && !provenModels.includes(m))
+    ...CONFIG.DEFAULT_FALLBACK_CHAIN.filter(m => m !== primary)
   ];
 
   const uniqueModels = [...new Set(candidateModels)];
@@ -81,7 +73,7 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
         }
       }
 
-      // اگر با ابزار سرچ خطا داد، همان مدل را بدون سرچ صدا بزن
+      // در صورت خطای ابزار سرچ، تلاش بدون سرچ روی همان مدل
       if (enableSearch) {
         delete payload.tools;
         const retryRes = await fetch(url, {
@@ -113,7 +105,7 @@ export async function callVision(imageDataUri, userPrompt, config, systemPrompt)
   const geminiKey = await storage.getGeminiKey();
   if (!geminiKey) throw new Error("کلید Gemini تنظیم نشده است.");
 
-  const candidateModels = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
+  const candidateModels = CONFIG.DEFAULT_FALLBACK_CHAIN;
   const matches = imageDataUri.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
   if (!matches) throw new Error("فرمت تصویر نامعتبر است.");
 

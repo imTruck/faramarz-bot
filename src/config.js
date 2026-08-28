@@ -5,32 +5,30 @@ export const CONFIG = {
   OWNER_USERNAME: "Bxiqm",
 
   // سریع‌ترین مدل پیش‌فرض
-  FAST_SEARCH_MODEL: "gemini-3.5-flash",
+  FAST_SEARCH_MODEL: "gemini-3.7-flash",
 
-  // زنجیره مدل‌های پیش‌فرض با قابلیت سوییچ خودکار (Failover Chain)
-  // در صورتی که مدلی لیمیت (429) یا خطا بخورد، فوراً به مدل بعدی در این لیست سوییچ می‌شود
+  // زنجیره اولویت دقیق مدل‌ها با سوییچ خودکار (Failover Chain)
   DEFAULT_FALLBACK_CHAIN: [
-    "gemini-3.5-flash",
-    "gemini-3.6-flash",
-    "gemini-2.5-flash",
     "gemini-3.7-flash",
-    "gemini-3-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
-    "gemini-3.5-flash-lite"
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash"
   ],
 
-  // لیست مدل‌های قابل انتخاب
+  // لیست مدل‌های قابل انتخاب در پنل مدیریت
   GEMINI_MODELS: [
-    { id: "gemini-3.5-flash", name: "⚡ Gemini 3.5 Flash (اولویت ۱)" },
+    { id: "gemini-3.7-flash", name: "⚡ Gemini 3.7 Flash (اولویت ۱)" },
     { id: "gemini-3.6-flash", name: "⚡ Gemini 3.6 Flash (اولویت ۲)" },
-    { id: "gemini-2.5-flash", name: "⚡ Gemini 2.5 Flash (اولویت ۳)" },
-    { id: "gemini-3.7-flash", name: "⚡ Gemini 3.7 Flash (اولویت ۴)" },
-    { id: "gemini-3-flash", name: "⚡ Gemini 3 Flash (اولویت ۵)" },
-    { id: "gemini-3.1-flash-lite", name: "🪶 Gemini 3.1 Flash Lite (اولویت ۶)" },
-    { id: "gemini-3.5-flash-lite", name: "🪶 Gemini 3.5 Flash Lite (اولویت ۷)" },
-    { id: "gemini-2.5-pro", name: "🧠 Gemini 2.5 Pro" },
-    { id: "deep-research-pro-preview-12-2025", name: "🔬 Deep Research Pro" },
-    { id: "deep-research-max-preview-04-2026", name: "🚀 Deep Research Max" }
+    { id: "gemini-3.5-flash", name: "⚡ Gemini 3.5 Flash (اولویت ۳)" },
+    { id: "gemini-3.5-flash-lite", name: "🪶 Gemini 3.5 Flash Lite (اولویت ۴)" },
+    { id: "gemini-3.1-flash-lite", name: "🪶 Gemini 3.1 Flash Lite (اولویت ۵)" },
+    { id: "gemini-2.5-flash", name: "⚡ Gemini 2.5 Flash (پشتیبان)" },
+    { id: "gemini-2.0-flash", name: "⚡ Gemini 2.0 Flash (پشتیبان)" },
+    { id: "gemini-1.5-flash", name: "⚡ Gemini 1.5 Flash (پشتیبان)" }
   ],
 
   // سطوح سه‌گانه تحقیق
@@ -38,19 +36,19 @@ export const CONFIG = {
     simple: {
       id: "simple",
       title: "⚡ تحقیق ساده",
-      model: "gemini-3.5-flash",
+      model: "gemini-3.7-flash",
       desc: "پاسخ‌های سریع و روزمره"
     },
     strong: {
       id: "strong",
       title: "🔬 تحقیق قوی",
-      model: "deep-research-pro-preview-12-2025",
-      desc: "تحلیل مقایسه‌ای و پردازش چندمنبعی"
+      model: "gemini-3.6-flash",
+      desc: "تحلیل مقایسه‌ای و چندمنبعی"
     },
     max: {
       id: "max",
       title: "🚀 تحقیق خیلی قوی",
-      model: "deep-research-max-preview-04-2026",
+      model: "gemini-3.5-flash",
       desc: "بررسی جامع و عمیق دانشگاهی"
     }
   },
