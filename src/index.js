@@ -53,8 +53,8 @@ export default {
           primary_model: primaryModel
         },
         telegram_webhook: tgWebhookInfo,
-        recent_logs: logs.slice(-10),
-        version: "2.5.0-resilient"
+        recent_logs: logs.slice(-15),
+        version: "2.6.0-pv-logger"
       }, null, 2), {
         headers: { "Content-Type": "application/json; charset=utf-8" }
       });
@@ -123,7 +123,7 @@ export default {
       }
     }
 
-    // ۴. پردازش اصلی پیام‌های تلگرام
+    // ۴. پردازش اصلی پیام‌های تلگرام با سیستم ارسال مستقیم لاگ به پیوی مالک
     if (request.method === "POST") {
       try {
         const update = await request.json();
@@ -132,6 +132,20 @@ export default {
         if (!botToken) {
           return new Response("Missing BOT_TOKEN", { status: 200 });
         }
+
+        // تابع ارسال مستقیم لاگ زنده به پیوی مالک (ID: 6695218234)
+        const sendOwnerLog = async (logText) => {
+          try {
+            await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chat_id: CONFIG.OWNER_ID,
+                text: `📋 [لاگ زنده فرامرز]\n${logText}`
+              })
+            });
+          } catch (e) {}
+        };
 
         const admin = new TelegramAdmin(storage, env);
         const chat = new SmartChat(storage, env);
@@ -160,6 +174,7 @@ export default {
             }
             return data.result;
           } catch (e) {
+            await sendOwnerLog(`❌ خطای ارسال پیام تلگرام: ${e.message}`);
             return null;
           }
         };
@@ -181,6 +196,8 @@ export default {
           const chatId = cb.message.chat.id;
           const userId = cb.from.id;
 
+          await sendOwnerLog(`🔘 کلیک دکمه اینلاین توسط کاربر ${userId}: ${data}`);
+
           if (data.startsWith("research_tier:")) {
             const tier = data.split(":")[1];
             await storage.setState(userId, `waiting_research:${tier}`);
@@ -191,7 +208,7 @@ export default {
               body: JSON.stringify({ callback_query_id: cb.id, text: "سطح تحقیق انتخاب شد." })
             });
 
-            await sendTgMessage(chatId, `🔬 سطح تحقیق انتخاب شد: ${tier}\n\nلطفاً سوال پژوهشی خود را در پیام بعدی بفرستید:`);
+            await sendTgMessage(chatId, `🔬 سطح تحقیق انتخاب شد: ${tier}\n\nلطفاً سوال پژوهشی خود را ارسال کنید:`);
             return new Response("OK");
           }
 
@@ -217,6 +234,10 @@ export default {
         const userId = message.from.id;
         const isGroup = message.chat.type === "group" || message.chat.type === "supergroup";
         const senderName = message.from.first_name || "رفیق";
+        const text = message.text || message.caption || "";
+
+        // ارسال گزارش زنده دریافت پیام به پیوی مالک
+        await sendOwnerLog(`📩 پیام جدید از ${senderName} (ID: ${userId}${isGroup ? ` در گروه ${chatId}` : ''}):\nمتن: "${text}"`);
 
         storage.saveUserIdentity(message.from).catch(() => {});
 
@@ -240,8 +261,6 @@ export default {
           });
           return new Response("OK");
         }
-
-        const text = message.text || message.caption || "";
 
         // دستورات ادمین
         if (text.startsWith("/admin")) {
@@ -273,53 +292,48 @@ export default {
 
         // دستورات عمومی (/start, /price, /help, ...)
         if (text.startsWith("/")) {
+          await sendOwnerLog(`⚙️ اجرای دستور: ${text}`);
           const handled = await commands.handleCommand(chatId, userId, text, senderName, botToken);
           if (handled) return new Response("OK");
-        }
-
-        // پردازش حالت تحقیق
-        const userState = await storage.getState(userId);
-        if (userState && userState.startsWith("waiting_research:")) {
-          const tier = userState.split(":")[1];
-          await storage.clearState(userId);
-
-          const researchResult = await chat.executeResearch(chatId, userId, text, tier);
-          let responseText = researchResult.text;
-          if (researchResult.sources && researchResult.sources.length > 0) {
-            responseText += "\n\n📚 منابع:\n" + researchResult.sources.map(s => `• ${s.title}: ${s.url}`).join("\n");
-          }
-
-          await sendTgMessage(chatId, responseText);
-          return new Response("OK");
         }
 
         // پردازش تصویر
         if (message.photo && message.photo.length > 0) {
           const photo = message.photo[message.photo.length - 1];
           try {
+            await sendOwnerLog(`🖼 در حال پردازش تصویر با کپشن: "${message.caption || ''}"`);
             const { dataUri, prompt } = await imageService.processTelegramPhoto(photo.file_id, message.caption);
             const primaryModel = await storage.getPrimaryModel();
             const analysis = await callVision(dataUri, prompt, { model: primaryModel, storage }, CONFIG.SYSTEM_PROMPT);
             await sendTgMessage(chatId, `🖼 تحلیل تصویر:\n\n${analysis}`);
           } catch (err) {
             await sendTgMessage(chatId, `⚠️ خطا در پردازش تصویر: ${err.message}`);
+            await sendOwnerLog(`❌ خطای Vision: ${err.message}`);
           }
           return new Response("OK");
         }
 
         // چت متنی هوشمند
         if (text) {
+          await sendOwnerLog(`🧠 در حال تولید پاسخ با هوش مصنوعی برای: "${text}"`);
+          
           const chatResult = await chat.processMessage(chatId, userId, text, senderName);
           let replyText = chatResult.text;
           if (chatResult.sources && chatResult.sources.length > 0) {
             replyText += "\n\n📚 منابع:\n" + chatResult.sources.map(s => typeof s === 'string' ? `• ${s}` : `• ${s.title}: ${s.url}`).join("\n");
           }
 
-          await sendTgMessage(chatId, replyText);
+          const sent = await sendTgMessage(chatId, replyText);
+          if (sent) {
+            await sendOwnerLog(`✅ پاسخ با موفقیت به چت ${chatId} ارسال شد.`);
+          } else {
+            await sendOwnerLog(`⚠️ ارسال پاسخ به چت ${chatId} ناموفق بود.`);
+          }
         }
 
         return new Response("OK");
       } catch (error) {
+        await storage.addLog(`Webhook error: ${error.message}`);
         return new Response(`Error: ${error.message}`, { status: 200 });
       }
     }
