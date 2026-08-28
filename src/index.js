@@ -52,7 +52,7 @@ export default {
           primary_model: primaryModel
         },
         telegram_webhook: tgWebhookInfo,
-        version: "2.2.0-fast-edge"
+        version: "2.3.0-animated-edge"
       }, null, 2), {
         headers: { "Content-Type": "application/json; charset=utf-8" }
       });
@@ -159,7 +159,16 @@ export default {
         const imageService = new ImageService(storage);
         const groupService = new GroupService(env.KV_STORAGE);
 
-        // ارسال پیام با مدیریت خودکار پارس‌مود
+        // ارسال اکشن در حال تایپ
+        const sendTyping = (chatId) => {
+          fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId, action: "typing" })
+          }).catch(() => {});
+        };
+
+        // ارسال پیام ساده جدید
         const sendTgMessage = async (chatId, text, replyMarkup = null, parseMode = "Markdown") => {
           const payload = { chat_id: chatId, text, reply_markup: replyMarkup };
           if (parseMode) payload.parse_mode = parseMode;
@@ -170,23 +179,51 @@ export default {
             body: JSON.stringify(payload)
           });
 
-          if (!res.ok) {
+          let data = await res.json();
+          if (!data.ok) {
             delete payload.parse_mode;
-            await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload)
             });
+            data = await res.json();
           }
+          return data.result;
         };
 
-        // ارسال سریع وضعیت "در حال نوشتن..."
-        const sendTyping = (chatId) => {
-          fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
+        // ویرایش پیام اولیه با انیمیشن و پاسخ نهایی (Edit Message)
+        const editTgMessage = async (chatId, messageId, text, replyMarkup = null, parseMode = "Markdown") => {
+          const payload = {
+            chat_id: chatId,
+            message_id: messageId,
+            text,
+            reply_markup: replyMarkup
+          };
+          if (parseMode) payload.parse_mode = parseMode;
+
+          let res = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: chatId, action: "typing" })
-          }).catch(() => {});
+            body: JSON.stringify(payload)
+          });
+
+          let data = await res.json();
+          if (!data.ok) {
+            // تلاش مجدد بدون مارک‌داون
+            delete payload.parse_mode;
+            res = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            });
+            data = await res.json();
+
+            // اگر ویرایش ممکن نبود (مثلاً متن بیش از سقف تلگرام)، پیام جدید بفرست
+            if (!data.ok) {
+              await sendTgMessage(chatId, text, replyMarkup, null);
+            }
+          }
         };
 
         // --- پردازش Callback Queries (دکمه‌های اینلاین) ---
@@ -206,7 +243,7 @@ export default {
               body: JSON.stringify({ callback_query_id: cb.id, text: "سطح تحقیق انتخاب شد." })
             });
 
-            await sendTgMessage(chatId, `🔬 **سطح تحقیق انتخاب شد:** \`${tier}\`\n\nلطفاً سوال یا موضوع پژوهشی خود را در پیام بعدی ارسال کنید (مهلت: ۵ دقیقه):`);
+            await sendTgMessage(chatId, `🔬 **سطح تحقیق انتخاب شد:** \`${tier}\`\n\nلطفاً سوال یا موضوع پژوهشی خود را ارسال کنید (مهلت: ۵ دقیقه):`);
             return new Response("OK");
           }
 
@@ -233,7 +270,6 @@ export default {
         const isGroup = message.chat.type === "group" || message.chat.type === "supergroup";
         const senderName = message.from.first_name || "رفیق";
 
-        // ثبت غیرمسدودکننده هویت
         storage.saveUserIdentity(message.from).catch(() => {});
 
         if (isGroup) {
@@ -287,12 +323,16 @@ export default {
           return new Response("OK");
         }
 
-        // بررسی حالت تحقیق
+        // بررسی حالت تحقیق با انیمیشن انتظار زنده
         const userState = await storage.getState(userId);
         if (userState && userState.startsWith("waiting_research:")) {
           const tier = userState.split(":")[1];
           await storage.clearState(userId);
           sendTyping(chatId);
+
+          // ارسال پیام انتظار اولیه با انیمیشن
+          const waitMsg = await sendTgMessage(chatId, "🔬 *فرامرز در حال تحقیق و بررسی عمیق منابع است...* ⏳");
+          const waitMsgId = waitMsg?.message_id;
 
           const researchResult = await chat.executeResearch(chatId, userId, text, tier);
           let responseText = researchResult.text;
@@ -300,43 +340,70 @@ export default {
             responseText += "\n\n📚 **منابع:**\n" + researchResult.sources.map(s => `• [${s.title}](${s.url})`).join("\n");
           }
 
-          await sendTgMessage(chatId, responseText);
+          if (waitMsgId) {
+            await editTgMessage(chatId, waitMsgId, responseText);
+          } else {
+            await sendTgMessage(chatId, responseText);
+          }
           return new Response("OK");
         }
 
-        // پردازش تصویر
+        // پردازش تصویر همراه با انیمیشن تحلیل
         if (message.photo && message.photo.length > 0) {
           sendTyping(chatId);
+          const waitMsg = await sendTgMessage(chatId, "🖼 *فرامرز در حال بررسی و تحلیل دقیق تصویره...* ✨");
+          const waitMsgId = waitMsg?.message_id;
+
           const photo = message.photo[message.photo.length - 1];
           try {
             const { dataUri, prompt } = await imageService.processTelegramPhoto(photo.file_id, message.caption);
             const primaryModel = await storage.getPrimaryModel();
             const analysis = await callVision(dataUri, prompt, { model: primaryModel, storage }, CONFIG.SYSTEM_PROMPT);
-            await sendTgMessage(chatId, `🖼 **تحلیل تصویر:**\n\n${analysis}`);
+            
+            const finalImageResponse = `🖼 **تحلیل تصویر:**\n\n${analysis}`;
+            if (waitMsgId) {
+              await editTgMessage(chatId, waitMsgId, finalImageResponse);
+            } else {
+              await sendTgMessage(chatId, finalImageResponse);
+            }
           } catch (err) {
-            await sendTgMessage(chatId, `⚠️ خطا در پردازش تصویر: ${err.message}`);
+            const errorMsg = `⚠️ خطا در پردازش تصویر: ${err.message}`;
+            if (waitMsgId) {
+              await editTgMessage(chatId, waitMsgId, errorMsg);
+            } else {
+              await sendTgMessage(chatId, errorMsg);
+            }
           }
           return new Response("OK");
         }
 
-        // دستورات
+        // دستورات استاندارد
         if (text.startsWith("/")) {
           const handled = await commands.handleCommand(chatId, userId, text, senderName, botToken);
           if (handled) return new Response("OK");
         }
 
-        // ارسال اکشن در حال تایپ به تلگرام
+        // --- چت متنی هوشمند با انیمیشن زنده و تبدیل آنی به جواب نهایی ---
         sendTyping(chatId);
 
-        // پاسخگویی چت متنی
         if (text) {
+          // ۱. ارسال پیام موقت انیمیشنی
+          const waitMsg = await sendTgMessage(chatId, "💭 *فرامرز در حال تفکره...* ⚡");
+          const waitMsgId = waitMsg?.message_id;
+
+          // ۲. تولید پاسخ با هوش مصنوعی و زنجیره ۷ مدل
           const chatResult = await chat.processMessage(chatId, userId, text, senderName);
           let replyText = chatResult.text;
           if (chatResult.sources && chatResult.sources.length > 0) {
             replyText += "\n\n📚 **منابع:**\n" + chatResult.sources.map(s => typeof s === 'string' ? `• ${s}` : `• [${s.title}](${s.url})`).join("\n");
           }
 
-          await sendTgMessage(chatId, replyText);
+          // ۳. تبدیل همان پیام اولیه به پاسخ نهایی به صورت کاملاً نرم و پویا
+          if (waitMsgId) {
+            await editTgMessage(chatId, waitMsgId, replyText);
+          } else {
+            await sendTgMessage(chatId, replyText);
+          }
         }
 
         return new Response("OK");
