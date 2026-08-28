@@ -1,0 +1,17 @@
+name = "faramarz-bot"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+workers_dev = true
+keep_vars = true
+
+[observability]
+enabled = true
+
+[[kv_namespaces]]
+binding = "KV_STORAGE"
+id = "YOUR_KV_NAMESPACE_ID"
+preview_id = "YOUR_PREVIEW_KV_NAMESPACE_ID"
+
+[vars]
+ENVIRONMENT = "production"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"

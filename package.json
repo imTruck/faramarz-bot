@@ -1,0 +1,24 @@
+{
+  "name": "faramarz-bot",
+  "version": "2.0.0",
+  "description": "Smart Persian Telegram Bot powered by Cloudflare Workers, KV Storage, and Gemini/OpenAI APIs",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build": "echo 'Build complete'"
+  },
+  "keywords": [
+    "telegram-bot",
+    "cloudflare-workers",
+    "gemini",
+    "ai",
+    "kv-storage"
+  ],
+  "author": "mwri-tech",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^3.110.0"
+  }
+}
