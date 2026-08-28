@@ -54,7 +54,7 @@ export default {
         },
         telegram_webhook: tgWebhookInfo,
         recent_logs: logs.slice(-15),
-        version: "2.6.0-pv-logger"
+        version: "2.7.0-detail-logger"
       }, null, 2), {
         headers: { "Content-Type": "application/json; charset=utf-8" }
       });
@@ -123,7 +123,7 @@ export default {
       }
     }
 
-    // ۴. پردازش اصلی پیام‌های تلگرام با سیستم ارسال مستقیم لاگ به پیوی مالک
+    // ۴. پردازش اصلی پیام‌های تلگرام با سیستم لاگ فوق‌العاده جزئی
     if (request.method === "POST") {
       try {
         const update = await request.json();
@@ -133,7 +133,7 @@ export default {
           return new Response("Missing BOT_TOKEN", { status: 200 });
         }
 
-        // تابع ارسال مستقیم لاگ زنده به پیوی مالک (ID: 6695218234)
+        // تابع ارسال لاگ زنده به پیوی مالک
         const sendOwnerLog = async (logText) => {
           try {
             await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -141,7 +141,7 @@ export default {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 chat_id: CONFIG.OWNER_ID,
-                text: `📋 [لاگ زنده فرامرز]\n${logText}`
+                text: `📋 [لاگ فرامرز]\n${logText}`
               })
             });
           } catch (e) {}
@@ -153,9 +153,11 @@ export default {
         const imageService = new ImageService(storage);
         const groupService = new GroupService(env.KV_STORAGE);
 
-        // ارسال پیام با تست خطای مارک‌داون
+        // تابع ارسال پیام به تلگرام با گزارش دقیق خطا در صورت عدم موفقیت
         const sendTgMessage = async (chatId, text, replyMarkup = null) => {
-          const payload = { chat_id: chatId, text, reply_markup: replyMarkup };
+          const safeText = (text && typeof text === 'string' && text.trim().length > 0) ? text.trim() : "سلام رفیق! پیام دریافت شد ولی خروجی متنی تولید نشد.";
+          const payload = { chat_id: chatId, text: safeText, reply_markup: replyMarkup };
+
           try {
             let res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
               method: "POST",
@@ -165,21 +167,27 @@ export default {
 
             let data = await res.json();
             if (!data.ok) {
+              // تلاش مجدد بدون مارک‌داون
               res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
               });
               data = await res.json();
+
+              if (!data.ok) {
+                await sendOwnerLog(`❌ خطای قطعی ارسال تلگرام:\nکد: ${data.error_code}\nپیام: ${data.description}\nمتن پیام ارسالی: "${safeText.slice(0, 100)}..."`);
+                return null;
+              }
             }
             return data.result;
           } catch (e) {
-            await sendOwnerLog(`❌ خطای ارسال پیام تلگرام: ${e.message}`);
+            await sendOwnerLog(`❌ خطای شبکه در ارسال پیام: ${e.message}`);
             return null;
           }
         };
 
-        // ارسال اکشن تایپینگ
+        // اکشن در حال تایپ
         const targetChatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
         if (targetChatId) {
           fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
@@ -196,7 +204,7 @@ export default {
           const chatId = cb.message.chat.id;
           const userId = cb.from.id;
 
-          await sendOwnerLog(`🔘 کلیک دکمه اینلاین توسط کاربر ${userId}: ${data}`);
+          await sendOwnerLog(`🔘 دکمه کلیک شد: ${data} (توسط کاربر: ${userId})`);
 
           if (data.startsWith("research_tier:")) {
             const tier = data.split(":")[1];
@@ -235,9 +243,6 @@ export default {
         const isGroup = message.chat.type === "group" || message.chat.type === "supergroup";
         const senderName = message.from.first_name || "رفیق";
         const text = message.text || message.caption || "";
-
-        // ارسال گزارش زنده دریافت پیام به پیوی مالک
-        await sendOwnerLog(`📩 پیام جدید از ${senderName} (ID: ${userId}${isGroup ? ` در گروه ${chatId}` : ''}):\nمتن: "${text}"`);
 
         storage.saveUserIdentity(message.from).catch(() => {});
 
@@ -292,42 +297,26 @@ export default {
 
         // دستورات عمومی (/start, /price, /help, ...)
         if (text.startsWith("/")) {
-          await sendOwnerLog(`⚙️ اجرای دستور: ${text}`);
+          await sendOwnerLog(`⚙️ اجرای دستور: "${text}" توسط ${senderName}`);
           const handled = await commands.handleCommand(chatId, userId, text, senderName, botToken);
           if (handled) return new Response("OK");
         }
 
-        // پردازش تصویر
-        if (message.photo && message.photo.length > 0) {
-          const photo = message.photo[message.photo.length - 1];
-          try {
-            await sendOwnerLog(`🖼 در حال پردازش تصویر با کپشن: "${message.caption || ''}"`);
-            const { dataUri, prompt } = await imageService.processTelegramPhoto(photo.file_id, message.caption);
-            const primaryModel = await storage.getPrimaryModel();
-            const analysis = await callVision(dataUri, prompt, { model: primaryModel, storage }, CONFIG.SYSTEM_PROMPT);
-            await sendTgMessage(chatId, `🖼 تحلیل تصویر:\n\n${analysis}`);
-          } catch (err) {
-            await sendTgMessage(chatId, `⚠️ خطا در پردازش تصویر: ${err.message}`);
-            await sendOwnerLog(`❌ خطای Vision: ${err.message}`);
-          }
-          return new Response("OK");
-        }
-
         // چت متنی هوشمند
         if (text) {
-          await sendOwnerLog(`🧠 در حال تولید پاسخ با هوش مصنوعی برای: "${text}"`);
-          
+          await sendOwnerLog(`🧠 شروع تولید پاسخ هوش مصنوعی برای: "${text}"`);
+
           const chatResult = await chat.processMessage(chatId, userId, text, senderName);
           let replyText = chatResult.text;
           if (chatResult.sources && chatResult.sources.length > 0) {
             replyText += "\n\n📚 منابع:\n" + chatResult.sources.map(s => typeof s === 'string' ? `• ${s}` : `• ${s.title}: ${s.url}`).join("\n");
           }
 
+          await sendOwnerLog(`📝 متن پاسخ آماده شد (${replyText.length} کاراکتر):\n"${replyText.slice(0, 80)}..."`);
+
           const sent = await sendTgMessage(chatId, replyText);
           if (sent) {
-            await sendOwnerLog(`✅ پاسخ با موفقیت به چت ${chatId} ارسال شد.`);
-          } else {
-            await sendOwnerLog(`⚠️ ارسال پاسخ به چت ${chatId} ناموفق بود.`);
+            await sendOwnerLog(`✅ پاسخ با موفقیت در چت تحویل داده شد (Message ID: ${sent.message_id})`);
           }
         }
 

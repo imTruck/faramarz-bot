@@ -5,14 +5,23 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
   const geminiKey = await storage.getGeminiKey();
 
   if (!geminiKey) {
-    throw new Error("کلید Gemini تنظیم نشده است.");
+    throw new Error("کلید Gemini در دسترس نیست.");
   }
 
-  // چیدمان دقیق زنجیره مدل‌ها بر اساس اولویت کاربر
-  const primary = model || CONFIG.DEFAULT_FALLBACK_CHAIN[0];
+  // مدل‌های فعال و زنده
+  const provenModels = [
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-pro"
+  ];
+
+  const primary = model || provenModels[0];
   const candidateModels = [
     primary,
-    ...CONFIG.DEFAULT_FALLBACK_CHAIN.filter(m => m !== primary)
+    ...provenModels.filter(m => m !== primary),
+    ...CONFIG.DEFAULT_FALLBACK_CHAIN.filter(m => m !== primary && !provenModels.includes(m))
   ];
 
   const uniqueModels = [...new Set(candidateModels)];
@@ -54,7 +63,11 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
       if (res.ok) {
         const data = await res.json();
         const candidate = data.candidates?.[0];
-        const text = candidate?.content?.parts?.[0]?.text;
+        
+        // استخراج صحیح و کامل متن از تمام بخش‌های پاسخ (شامل متن‌های چندپارتی و خروجی‌های پس از فکر)
+        const parts = candidate?.content?.parts || [];
+        const textParts = parts.filter(p => typeof p.text === 'string').map(p => p.text.trim()).filter(Boolean);
+        const text = textParts.join("\n\n");
 
         if (text) {
           const sources = [];
@@ -73,7 +86,7 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
         }
       }
 
-      // در صورت خطای ابزار سرچ، تلاش بدون سرچ روی همان مدل
+      // در صورت بروز خطا در ابزار سرچ، تلاش بدون سرچ روی همان مدل
       if (enableSearch) {
         delete payload.tools;
         const retryRes = await fetch(url, {
@@ -83,13 +96,15 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
         });
         if (retryRes.ok) {
           const data = await retryRes.json();
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          const candidate = data.candidates?.[0];
+          const parts = candidate?.content?.parts || [];
+          const text = parts.filter(p => typeof p.text === 'string').map(p => p.text.trim()).filter(Boolean).join("\n\n");
           if (text) return { text, sources: [], modelUsed: cleanModel };
         }
       }
 
       const errText = await res.text();
-      lastError = `${cleanModel}: ${res.status}`;
+      lastError = `${cleanModel} (${res.status}): ${errText.slice(0, 100)}`;
       continue;
     } catch (netErr) {
       lastError = netErr.message;
@@ -97,7 +112,7 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
     }
   }
 
-  throw new Error(`خطای ارتباط با هوش مصنوعی (${lastError})`);
+  throw new Error(`خطای تولید پاسخ هوش مصنوعی: ${lastError}`);
 }
 
 export async function callVision(imageDataUri, userPrompt, config, systemPrompt) {
@@ -105,7 +120,7 @@ export async function callVision(imageDataUri, userPrompt, config, systemPrompt)
   const geminiKey = await storage.getGeminiKey();
   if (!geminiKey) throw new Error("کلید Gemini تنظیم نشده است.");
 
-  const candidateModels = CONFIG.DEFAULT_FALLBACK_CHAIN;
+  const candidateModels = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
   const matches = imageDataUri.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
   if (!matches) throw new Error("فرمت تصویر نامعتبر است.");
 
@@ -138,7 +153,10 @@ export async function callVision(imageDataUri, userPrompt, config, systemPrompt)
 
       if (res.ok) {
         const data = await res.json();
-        return data.candidates?.[0]?.content?.parts?.[0]?.text || "تحلیل تصویر ناموفق بود.";
+        const candidate = data.candidates?.[0];
+        const parts = candidate?.content?.parts || [];
+        const text = parts.filter(p => typeof p.text === 'string').map(p => p.text.trim()).filter(Boolean).join("\n\n");
+        if (text) return text;
       }
       continue;
     } catch (e) {
