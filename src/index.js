@@ -12,8 +12,9 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const storage = new StorageService(env);
+    const contentType = request.headers.get("content-type") || "";
 
-    // ۱. مسیر تشخیصی سلامت (/debug)
+    // ۱. مسیر تشخیصی سلامت و وضعیت دقیق وِبهوک تلگرام (/debug)
     if (url.pathname === "/debug") {
       let kvWorking = false;
       try {
@@ -30,6 +31,16 @@ export default {
       const geminiKey = await storage.getGeminiKey();
       const primaryModel = await storage.getPrimaryModel();
 
+      let tgWebhookInfo = null;
+      if (botToken) {
+        try {
+          const whRes = await fetch(`https://api.telegram.org/bot${botToken}/getWebhookInfo`);
+          tgWebhookInfo = await whRes.json();
+        } catch (e) {
+          tgWebhookInfo = { error: e.message };
+        }
+      }
+
       return new Response(JSON.stringify({
         status: "Online",
         timestamp: new Date().toISOString(),
@@ -40,13 +51,14 @@ export default {
           has_gemini_key: !!geminiKey,
           primary_model: primaryModel
         },
-        version: "2.0.0-cloudflare-esm"
+        telegram_webhook: tgWebhookInfo,
+        version: "2.1.0-cloudflare-esm"
       }, null, 2), {
         headers: { "Content-Type": "application/json; charset=utf-8" }
       });
     }
 
-    // ۲. مسیر صفحه راه‌اندازی و داشبورد تحت وب (/admin یا /setup یا /)
+    // ۲. مسیر صفحه راه‌اندازی و داشبورد تحت وب (GET /setup یا GET /admin یا GET /)
     if ((url.pathname === "/admin" || url.pathname === "/setup" || url.pathname === "/") && request.method === "GET") {
       let kvWorking = false;
       try {
@@ -66,8 +78,8 @@ export default {
       });
     }
 
-    // ۳. پردازش فرم ذخیره خودکار کلیدها و ست کردن اتوماتیک وِبهوک (POST /setup)
-    if ((url.pathname === "/setup" || url.pathname === "/admin" || url.pathname === "/") && request.method === "POST") {
+    // ۳. پردازش فرم تحت وب راه‌اندازی (فقط POST به /setup یا Form Data)
+    if ((url.pathname === "/setup" || contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data")) && request.method === "POST") {
       try {
         const formData = await request.formData();
         let botTokenInput = formData.get("bot_token")?.trim() || "";
@@ -77,11 +89,10 @@ export default {
         let isSuccess = true;
 
         if (botTokenInput) {
-          // نرمال‌سازی توکن و حذف کاراکترها یا کلمه bot اضافی
           const cleanToken = botTokenInput.replace(/^bot/i, "").trim();
           await storage.setBotToken(cleanToken);
 
-          // فعال‌سازی خودکار وِبهوک تلگرام از طریق متد استاندارد POST
+          // تنظیم خودکار وِبهوک تلگرام
           const webhookUrl = `${url.origin}/`;
           const tgWebhookUrl = `https://api.telegram.org/bot${cleanToken}/setWebhook`;
           
@@ -97,11 +108,7 @@ export default {
               message += `✅ توکن تلگرام ذخیره شد و <b>وبهوک تلگرام با موفقیت ست گردید</b>!<br>`;
             } else {
               isSuccess = false;
-              if (webhookData.description === "Not Found") {
-                message += `❌ <b>خطای تلگرام:</b> توکن وارد شده نامعتبر است یا در BotFather وجود ندارد (فرمت صحیح: <code>123456:ABC-DEF...</code>).<br>`;
-              } else {
-                message += `⚠️ توکن ذخیره شد ولی تلگرام پاسخ داد: <code>${webhookData.description}</code><br>`;
-              }
+              message += `⚠️ خطا در ست کردن وبهوک تلگرام: <code>${webhookData.description}</code><br>`;
             }
           } catch (netErr) {
             message += `⚠️ خطا در برقراری ارتباط با سرور تلگرام: ${netErr.message}<br>`;
@@ -137,14 +144,14 @@ export default {
       }
     }
 
-    // ۴. پردازش درخواست‌های Webhook تلگرام (POST /)
+    // ۴. پردازش اصلی پیام‌های Webhook تلگرام (JSON POST)
     if (request.method === "POST") {
       try {
         const update = await request.json();
         const botToken = await storage.getBotToken();
 
         if (!botToken) {
-          return new Response("Missing BOT_TOKEN in Storage or Environment", { status: 200 });
+          return new Response("Missing BOT_TOKEN", { status: 200 });
         }
 
         const admin = new TelegramAdmin(storage, env);
@@ -153,18 +160,30 @@ export default {
         const imageService = new ImageService(storage);
         const groupService = new GroupService(env.KV_STORAGE);
 
-        // ارسال پیام به تلگرام
+        // تابع ارسال پیام به تلگرام با هندل خطاهای احتمالی پارس‌مود
         const sendTgMessage = async (chatId, text, replyMarkup = null, parseMode = "Markdown") => {
-          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          const payload = {
+            chat_id: chatId,
+            text,
+            reply_markup: replyMarkup
+          };
+          if (parseMode) payload.parse_mode = parseMode;
+
+          let res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: chatId,
-              text,
-              parse_mode: parseMode,
-              reply_markup: replyMarkup
-            })
+            body: JSON.stringify(payload)
           });
+
+          // اگر تلگرام به علت خطای Markdown پیام را ریجکت کرد، بدون Markdown بفرست
+          if (!res.ok) {
+            delete payload.parse_mode;
+            await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            });
+          }
         };
 
         // --- پردازش Callback Queries (دکمه‌های اینلاین) ---
@@ -329,10 +348,11 @@ export default {
 
         return new Response("OK");
       } catch (error) {
-        return new Response(`Error: ${error.message}`, { status: 500 });
+        await storage.addLog(`Webhook processing error: ${error.message}`);
+        return new Response(`Error: ${error.message}`, { status: 200 });
       }
     }
 
-    return new Response("🤖 Faramarz Telegram Bot Worker is Active. Webhook Endpoint is Ready.", { status: 200 });
+    return new Response("🤖 Faramarz Telegram Bot Worker is Active.", { status: 200 });
   }
 };
