@@ -3,6 +3,7 @@ import { MemoryService } from './memory.js';
 import { GeminiSearchService } from './gemini-search.js';
 import { LiveInfoService } from './live-info.js';
 import { SearchService } from './search.js';
+import { ModelManager } from './model-manager.js';
 import { callAI } from './api.js';
 
 export class SmartChat {
@@ -13,6 +14,7 @@ export class SmartChat {
     this.geminiSearch = new GeminiSearchService(storage);
     this.liveInfo = new LiveInfoService();
     this.webSearch = new SearchService();
+    this.modelManager = new ModelManager(storage);
   }
 
   // استخراج خودکار فکت‌ها و اطلاعات هویتی
@@ -60,13 +62,14 @@ export class SmartChat {
     const searchContext = ddgResults.map(r => `• عنوان: ${r.title}\nشرح: ${r.snippet}\nلینک: ${r.link}`).join("\n\n");
     sources = ddgResults.map(r => ({ title: r.title, url: r.link }));
 
+    const fastModel = await this.modelManager.getFastSearchModel();
     const synthesisMessages = [
       { role: "user", content: `تحقیق جامع و دقیق درباره سوال زیر:\n${question}` },
       { role: "system", content: `نتایج جستجو و منابع مستند:\n${searchContext}\n\nلطفاً پاسخی ساختاریافته، تحلیلی و مستند به زبان فارسی بنویس.` }
     ];
 
     const response = await callAI(synthesisMessages, {
-      model: CONFIG.GEMINI_MODELS[0].id,
+      model: fastModel,
       storage: this.storage
     }, CONFIG.SYSTEM_PROMPT);
 
@@ -97,7 +100,7 @@ export class SmartChat {
 [اطلاعات حافظه بلندمدت این کاربر (${senderName})]:
 ${userMemory || "هنوز اطلاعات مشخصی ثبت نشده است."}
 
-راهنمای پروتکل جستجو: اگر برای پاسخ به اطلاعات به‌روز روزمره، نرخ‌های جدید، یا اخبار احتیاج داری، عبارت [[SEARCH:عبارت جستجو]] را خروجی بده تا سیستم سرچ کند.`;
+راهنمای پروتکل جستجو: اگر برای پاسخ به اطلاعات به‌روز روزمره، نرخ‌های جدید، یا اخبار احتیاج داری، عبارت [[SEARCH:عبارت جستجو]] را خروجی بده تا ربات با سریع‌ترین مدل هوشمند جستجو کند.`;
 
     const messages = [
       ...history,
@@ -125,8 +128,11 @@ ${userMemory || "هنوز اطلاعات مشخصی ثبت نشده است."}
       const query = searchMatch[1].trim();
       let searchContext = "";
 
+      // استفاده از مدل اختصاصی سریع برای سرچ (Ultra Fast Grounding)
+      const fastSearchModel = await this.modelManager.getFastSearchModel();
+
       // لایه ۱: Gemini Grounding
-      const geminiResult = await this.geminiSearch.searchWithGrounding(query, primaryModel);
+      const geminiResult = await this.geminiSearch.searchWithGrounding(query, fastSearchModel);
       if (geminiResult.success && geminiResult.text) {
         searchContext = geminiResult.text;
         sources = geminiResult.sources || [];
@@ -145,7 +151,7 @@ ${userMemory || "هنوز اطلاعات مشخصی ثبت نشده است."}
       ];
 
       aiResponse = await callAI(synthesisMessages, {
-        model: primaryModel,
+        model: fastSearchModel,
         storage: this.storage
       }, dynamicSystemPrompt);
     }

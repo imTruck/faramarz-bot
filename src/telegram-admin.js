@@ -1,6 +1,7 @@
 import { CONFIG } from './config.js';
 import { LiveInfoService } from './live-info.js';
 import { MemoryService } from './memory.js';
+import { ModelManager } from './model-manager.js';
 
 export class TelegramAdmin {
   constructor(storage, env) {
@@ -8,6 +9,7 @@ export class TelegramAdmin {
     this.env = env;
     this.liveInfo = new LiveInfoService();
     this.memory = new MemoryService(storage.kv);
+    this.modelManager = new ModelManager(storage);
   }
 
   // بررسی سطح دسترسی مالک
@@ -18,6 +20,7 @@ export class TelegramAdmin {
   // ارسال پنل اصلی ادمین
   async sendAdminPanel(chatId, botToken) {
     const primaryModel = await this.storage.getPrimaryModel();
+    const fastSearch = await this.modelManager.getFastSearchModel();
 
     const keyboard = {
       inline_keyboard: [
@@ -34,14 +37,15 @@ export class TelegramAdmin {
           { text: "📈 لاگ‌های سیستم", callback_data: "adm_logs" }
         ],
         [
-          { text: "🔌 مدیریت APIها", callback_data: "adm_apis" }
+          { text: "📡 اسکن و همگام‌سازی مدل‌های جدید", callback_data: "adm_scan_sync" }
         ]
       ]
     };
 
     const text = `👑 **پنل مدیریت فرامرز (Cloudflare Workers)**
 
-• **مدل فعال فعلی:** \`${primaryModel}\`
+• **مدل فعال چت:** \`${primaryModel}\`
+• **مدل سریع سرچ:** \`${fastSearch}\`
 • **وضعیت سرور:** آنلاین (Edge Network)
 • **شناسه مالک:** \`${CONFIG.OWNER_ID}\`
 
@@ -79,10 +83,12 @@ export class TelegramAdmin {
     const messageId = callbackQuery.message.message_id;
     const chatId = callbackQuery.message.chat.id;
 
-    // ۱. منوی انتخاب مدل‌های Gemini
+    // ۱. منوی انتخاب مدل‌های Gemini (شامل مدل‌های پیش‌فرض + مدل‌های کشف‌شده)
     if (data === "adm_models") {
       const currentModel = await this.storage.getPrimaryModel();
-      const buttons = CONFIG.GEMINI_MODELS.map(m => ([{
+      const allAvailable = await this.modelManager.getAllAvailableModels();
+
+      const buttons = allAvailable.map(m => ([{
         text: (m.id === currentModel ? "✅ " : "") + m.name,
         callback_data: `set_model:${m.id}`
       }]));
@@ -95,7 +101,7 @@ export class TelegramAdmin {
         body: JSON.stringify({
           chat_id: chatId,
           message_id: messageId,
-          text: `🔮 **انتخاب مدل هوش مصنوعی:**\nمدل فعال: \`${currentModel}\`\n\nبرای تغییر، روی مدل مورد نظر کلیک کنید:`,
+          text: `🔮 **انتخاب مدل هوش مصنوعی:**\nمدل فعال: \`${currentModel}\`\nتعداد کل مدل‌های در دسترس: ${allAvailable.length}\n\nبرای تغییر، روی مدل مورد نظر کلیک کنید:`,
           parse_mode: "Markdown",
           reply_markup: { inline_keyboard: buttons }
         })

@@ -23,7 +23,8 @@ export class CommandHandler {
     return {
       keyboard: [
         [{ text: "🔬 تحقیق" }, { text: "📊 قیمت‌های لحظه‌ای" }],
-        [{ text: "💾 حافظه من" }, { text: "❓ راهنما" }]
+        [{ text: "📡 اسکن مدل‌های رایگان" }, { text: "💾 حافظه من" }],
+        [{ text: "❓ راهنما" }]
       ],
       resize_keyboard: true
     };
@@ -66,12 +67,13 @@ export class CommandHandler {
 
 هر سوالی داری به زبان کاملاً طبیعی از من بپرس. از وضعیت آب‌وهوا و اخبار گرفته تا قیمت دلار و طلا، تحلیل عکس‌ها، برنامه‌نویسی و تحقیقات عمیق در خدمتم!
 
-🔹 **امکانات ویژه:**
+🔹 **امکانات هوشمند و ویژه:**
 • 💬 **چت صمیمی و باهوش:** با حافظه پایدار و درک متون فارسی
-• 🔬 **موتور تحقیق ۳ سطحی:** با کلیک روی دکمه تحقیق
+• ⚡ **موتور سرچ خودکار فوق‌سریع:** انتخاب هوشمند سریع‌ترین مدل برای پردازش سرچ
+• 📡 **کشف خودکار مدل‌های رایگان گوگل:** اسکن لحظه‌ای تمام مدل‌های جدید گوگل و ثبت در حافظه
+• 🔬 **موتور تحقیق ۳ سطحی:** ساده، قوی و عمیق
 • 📊 **قیمت‌های لحظه‌ای:** دلار، طلا، سکه و کریپتو
 • 🖼 **تحلیل تصویر:** ارسال عکس با کپشن برای توضیح و OCR
-• 🔍 **جستجوی وب خودکار:** استخراج منابع معتبر و لینک‌ها
 
 از کیبورد زیر یا منوی دستورات می‌تونی شروع کنی:`;
       await sendMessage(welcome, this.getMainKeyboard());
@@ -97,7 +99,57 @@ export class CommandHandler {
       return true;
     }
 
-    // ۴. دستور /search
+    // ۴. دستور /scan یا دکمه اسکن مدل‌های رایگان (کشف زنده از گوگل + ثبت خودکار)
+    if (cmd === "/scan" || cmd === "📡 اسکن مدل‌های رایگان" || cmd === "/syncmodels") {
+      await sendMessage("⏳ **در حال ارتباط با Google AI Studio و اسکن زنده تمامی مدل‌ها...**\n(مدل‌های رایگان و جدید به صورت خودکار ثبت می‌شوند)");
+      
+      const scanResult = await this.scanner.autoDiscoverAndScan();
+      if (!scanResult.success) {
+        await sendMessage(`❌ خطا در اسکن: ${scanResult.error}`);
+        return true;
+      }
+
+      let rep = `📡 **گزارش اسکن و کشف زنده مدل‌های گوگل:**\n`;
+      rep += `• مجموع مدل‌های بررسی شده: **${scanResult.totalScanned} مدل**\n`;
+      rep += `• مدل‌های فعال و رایگان: **${scanResult.freeModels.length} مدل**\n\n`;
+
+      if (scanResult.newlyDiscovered.length > 0) {
+        rep += `🎉 **مدل‌های جدید کشف و اضافه شده به ربات:**\n`;
+        scanResult.newlyDiscovered.forEach(n => {
+          rep += `✨ \`${n.id}\` (${n.name})\n`;
+        });
+        rep += `\n`;
+      }
+
+      rep += `🟢 **لیست مدل‌های رایگان و آماده استفاده:**\n`;
+      scanResult.freeModels.forEach((m, idx) => {
+        rep += `${idx + 1}. \`${m.id}\` — ${m.status}\n`;
+      });
+
+      await sendMessage(rep);
+      return true;
+    }
+
+    // ۵. دستور /models و /models-list
+    if (cmd === "/models" || cmd === "/models-list") {
+      const active = await this.storage.getPrimaryModel();
+      const fastSearch = await this.modelManager.getFastSearchModel();
+      const allModels = await this.modelManager.getAllAvailableModels();
+
+      let rep = `🔮 **مدل‌های متصل و آماده استفاده:**\n`;
+      rep += `• مدل اصلی چت: \`${active}\`\n`;
+      rep += `• مدل سریع جستجو: \`${fastSearch}\`\n\n`;
+
+      allModels.forEach((m, idx) => {
+        rep += `${idx + 1}. **${m.name}**\nشناسه: \`${m.id}\`\n\n`;
+      });
+
+      rep += `_برای اسکن و افزودن جدیدترین مدل‌های رایگان گوگل دستور /scan را بفرستید._`;
+      await sendMessage(rep);
+      return true;
+    }
+
+    // ۶. دستور /search
     if (cmd === "/search") {
       if (!args) {
         await sendMessage("لطفاً عبارت مورد نظر را وارد کنید:\nمثال: `/search هوش مصنوعی در سال ۲۰۲۶`");
@@ -116,7 +168,7 @@ export class CommandHandler {
       return true;
     }
 
-    // ۵. دستور /browse
+    // ۷. دستور /browse
     if (cmd === "/browse") {
       if (!args || !args.startsWith("http")) {
         await sendMessage("لطفاً یک لینک معتبر ارسال کنید:\nمثال: `/browse https://fa.wikipedia.org`");
@@ -127,7 +179,7 @@ export class CommandHandler {
       return true;
     }
 
-    // ۶. دستورات حافظه (/memory, /remind, /forget)
+    // ۸. دستورات حافظه (/memory, /remind, /forget)
     if (cmd === "/memory" || cmd === "💾 حافظه من") {
       const memContext = await this.memory.getMemoryContext(userId);
       await sendMessage(`💾 **اطلاعات ثبت شده از شما در حافظه من:**\n\n${memContext || "هنوز نکته‌ای در حافظه ثبت نشده است. کافیست در چت خودتان را معرفی کنید یا از دستور /remind استفاده کنید."}`);
@@ -151,45 +203,20 @@ export class CommandHandler {
       return true;
     }
 
-    // ۷. دستور /scan
-    if (cmd === "/scan") {
-      await sendMessage("⏳ در حال اسکن وضعیت مدل‌های متصل...");
-      const scanResult = await this.scanner.scanAll(CONFIG.GEMINI_MODELS);
-      if (!scanResult.success) {
-        await sendMessage(`خطا: ${scanResult.error}`);
-        return true;
-      }
-      let rep = "📡 **گزارش وضعیت مدل‌ها:**\n\n";
-      scanResult.results.forEach(r => {
-        rep += `• \`${r.model}\`: ${r.message}\n`;
-      });
-      await sendMessage(rep);
-      return true;
-    }
-
-    // ۸. دستور /models و /models-list
-    if (cmd === "/models" || cmd === "/models-list") {
-      const active = await this.storage.getPrimaryModel();
-      let rep = `🔮 **مدل‌های پشتیبانی شده:**\nمدل فعال فعلی: \`${active}\`\n\n`;
-      CONFIG.GEMINI_MODELS.forEach((m, idx) => {
-        rep += `${idx + 1}. **${m.name}**\nشناسه: \`${m.id}\`\n\n`;
-      });
-      await sendMessage(rep);
-      return true;
-    }
-
     // ۹. دستور /status
     if (cmd === "/status") {
       const botTokenSet = !!(await this.storage.getBotToken());
       const geminiSet = !!(await this.storage.getGeminiKey());
       const activeModel = await this.storage.getPrimaryModel();
+      const fastSearchModel = await this.modelManager.getFastSearchModel();
 
       const rep = `⚡ **وضعیت سلامت ربات فرامرز:**
 • سرویس: Cloudflare Workers (Edge Global)
 • پایگاه داده: Cloudflare KV Storage
 • توکن ربات: ${botTokenSet ? 'متصل ✅' : 'ناموجود ❌'}
 • کلید Gemini: ${geminiSet ? 'فعال ✅' : 'ناموجود ❌'}
-• مدل اصلی فعال: \`${activeModel}\``;
+• مدل اصلی مکالمه: \`${activeModel}\`
+• مدل هوشمند و سریع سرچ: \`${fastSearchModel}\``;
       await sendMessage(rep);
       return true;
     }
@@ -206,6 +233,8 @@ export class CommandHandler {
       const help = `📖 **راهنمای جامع دستورات فرامرز:**
 
 • /start — شروع کار و بازنشانی کیبورد
+• /scan — اسکن زنده، کشف و ثبت تمام مدل‌های رایگان گوگل
+• /models — لیست تمامی مدل‌های فعال و کشف‌شده
 • /price یا /rate — مشاهده قیمت‌های لحظه‌ای بازار
 • /research — ورود به بخش تحقیق تخصصی ۳ سطحی
 • /search <عبارت> — جستجو در وب
@@ -213,9 +242,7 @@ export class CommandHandler {
 • /memory — مشاهده موارد ثبت‌شده در حافظه
 • /remind <نکته> — افزودن یادآوری به حافظه
 • /forget — پاک‌کردن کامل حافظه و تاریخچه
-• /scan — اسکن و تست وضعیت ارتباط با مدل‌ها
-• /models — لیست تمام مدل‌های جمینای
-• /status — وضعیت سرور و کلیدها
+• /status — وضعیت سرور، کلیدها و مدل‌های فعال
 • /clear — پاکسازی تاریخچه مکالمه جاری
 
 👑 **دستورات ویژه مالک:**

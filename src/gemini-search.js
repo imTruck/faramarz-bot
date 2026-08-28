@@ -1,16 +1,22 @@
+import { ModelManager } from './model-manager.js';
+
 export class GeminiSearchService {
   constructor(storage) {
     this.storage = storage;
+    this.modelManager = new ModelManager(storage);
   }
 
-  async searchWithGrounding(query, modelId = "gemini-2.5-flash") {
+  async searchWithGrounding(query, modelId = null) {
     const apiKey = await this.storage.getGeminiKey();
     if (!apiKey) {
       return { success: false, error: "کلید API برای Gemini تنظیم نشده است." };
     }
 
+    // انتخاب هوشمند سریع‌ترین مدل برای سرچ در صورت عدم تعیین مدل
+    const targetModel = modelId || await this.modelManager.getFastSearchModel();
+
     // نرمال‌سازی مدل و حذف پیشوند models/
-    const cleanModel = modelId.replace(/^models\//, "");
+    const cleanModel = targetModel.replace(/^models\//, "");
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
 
     const payload = {
@@ -59,6 +65,7 @@ export class GeminiSearchService {
 
       return {
         success: true,
+        modelUsed: cleanModel,
         text,
         sources
       };
