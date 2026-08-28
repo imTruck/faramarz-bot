@@ -14,7 +14,7 @@ export default {
     const storage = new StorageService(env);
     const contentType = request.headers.get("content-type") || "";
 
-    // ۱. مسیر تشخیصی سلامت و وضعیت دقیق وِبهوک تلگرام (/debug)
+    // ۱. مسیر تشخیصی سلامت و وضعیت لاگ‌ها و وِبهوک تلگرام (/debug)
     if (url.pathname === "/debug") {
       let kvWorking = false;
       try {
@@ -30,6 +30,7 @@ export default {
       const botToken = await storage.getBotToken();
       const geminiKey = await storage.getGeminiKey();
       const primaryModel = await storage.getPrimaryModel();
+      const logs = await storage.getLogs();
 
       let tgWebhookInfo = null;
       if (botToken) {
@@ -52,7 +53,8 @@ export default {
           primary_model: primaryModel
         },
         telegram_webhook: tgWebhookInfo,
-        version: "2.3.0-animated-edge"
+        recent_logs: logs.slice(-10),
+        version: "2.4.0-diagnostics"
       }, null, 2), {
         headers: { "Content-Type": "application/json; charset=utf-8" }
       });
@@ -159,40 +161,35 @@ export default {
         const imageService = new ImageService(storage);
         const groupService = new GroupService(env.KV_STORAGE);
 
-        // ارسال اکشن در حال تایپ
-        const sendTyping = (chatId) => {
-          fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: chatId, action: "typing" })
-          }).catch(() => {});
-        };
-
-        // ارسال پیام ساده جدید
+        // ارسال پیام با مدیریت خودکار
         const sendTgMessage = async (chatId, text, replyMarkup = null, parseMode = "Markdown") => {
           const payload = { chat_id: chatId, text, reply_markup: replyMarkup };
           if (parseMode) payload.parse_mode = parseMode;
 
-          let res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-          });
-
-          let data = await res.json();
-          if (!data.ok) {
-            delete payload.parse_mode;
-            res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          try {
+            let res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload)
             });
-            data = await res.json();
+
+            let data = await res.json();
+            if (!data.ok) {
+              delete payload.parse_mode;
+              res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+              });
+              data = await res.json();
+            }
+            return data.result;
+          } catch (e) {
+            return null;
           }
-          return data.result;
         };
 
-        // ویرایش پیام اولیه با انیمیشن و پاسخ نهایی (Edit Message)
+        // ویرایش پیام
         const editTgMessage = async (chatId, messageId, text, replyMarkup = null, parseMode = "Markdown") => {
           const payload = {
             chat_id: chatId,
@@ -202,31 +199,40 @@ export default {
           };
           if (parseMode) payload.parse_mode = parseMode;
 
-          let res = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-          });
-
-          let data = await res.json();
-          if (!data.ok) {
-            // تلاش مجدد بدون مارک‌داون
-            delete payload.parse_mode;
-            res = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+          try {
+            let res = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload)
             });
-            data = await res.json();
 
-            // اگر ویرایش ممکن نبود (مثلاً متن بیش از سقف تلگرام)، پیام جدید بفرست
+            let data = await res.json();
             if (!data.ok) {
-              await sendTgMessage(chatId, text, replyMarkup, null);
+              delete payload.parse_mode;
+              res = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+              });
+              data = await res.json();
+
+              if (!data.ok) {
+                await sendTgMessage(chatId, text, replyMarkup, null);
+              }
             }
+          } catch (e) {
+            await sendTgMessage(chatId, text, replyMarkup, null);
           }
         };
 
-        // --- پردازش Callback Queries (دکمه‌های اینلاین) ---
+        // اکشن در حال تایپ
+        fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: update.message?.chat?.id || update.callback_query?.message?.chat?.id, action: "typing" })
+        }).catch(() => {});
+
+        // پردازش دکمه‌های اینلاین
         if (update.callback_query) {
           const cb = update.callback_query;
           const data = cb.data;
@@ -243,7 +249,7 @@ export default {
               body: JSON.stringify({ callback_query_id: cb.id, text: "سطح تحقیق انتخاب شد." })
             });
 
-            await sendTgMessage(chatId, `🔬 **سطح تحقیق انتخاب شد:** \`${tier}\`\n\nلطفاً سوال یا موضوع پژوهشی خود را ارسال کنید (مهلت: ۵ دقیقه):`);
+            await sendTgMessage(chatId, `🔬 **سطح تحقیق انتخاب شد:** \`${tier}\`\n\nلطفاً سوال پژوهشی خود را در پیام بعدی ارسال کنید (مهلت: ۵ دقیقه):`);
             return new Response("OK");
           }
 
@@ -323,14 +329,18 @@ export default {
           return new Response("OK");
         }
 
-        // بررسی حالت تحقیق با انیمیشن انتظار زنده
+        // دستورات استاندارد (/start, /price, ...)
+        if (text.startsWith("/")) {
+          const handled = await commands.handleCommand(chatId, userId, text, senderName, botToken);
+          if (handled) return new Response("OK");
+        }
+
+        // پردازش حالت تحقیق
         const userState = await storage.getState(userId);
         if (userState && userState.startsWith("waiting_research:")) {
           const tier = userState.split(":")[1];
           await storage.clearState(userId);
-          sendTyping(chatId);
 
-          // ارسال پیام انتظار اولیه با انیمیشن
           const waitMsg = await sendTgMessage(chatId, "🔬 *فرامرز در حال تحقیق و بررسی عمیق منابع است...* ⏳");
           const waitMsgId = waitMsg?.message_id;
 
@@ -348,9 +358,8 @@ export default {
           return new Response("OK");
         }
 
-        // پردازش تصویر همراه با انیمیشن تحلیل
+        // پردازش تصویر
         if (message.photo && message.photo.length > 0) {
-          sendTyping(chatId);
           const waitMsg = await sendTgMessage(chatId, "🖼 *فرامرز در حال بررسی و تحلیل دقیق تصویره...* ✨");
           const waitMsgId = waitMsg?.message_id;
 
@@ -377,28 +386,17 @@ export default {
           return new Response("OK");
         }
 
-        // دستورات استاندارد
-        if (text.startsWith("/")) {
-          const handled = await commands.handleCommand(chatId, userId, text, senderName, botToken);
-          if (handled) return new Response("OK");
-        }
-
-        // --- چت متنی هوشمند با انیمیشن زنده و تبدیل آنی به جواب نهایی ---
-        sendTyping(chatId);
-
+        // چت متنی هوشمند با پیام انیمیشنی
         if (text) {
-          // ۱. ارسال پیام موقت انیمیشنی
           const waitMsg = await sendTgMessage(chatId, "💭 *فرامرز در حال تفکره...* ⚡");
           const waitMsgId = waitMsg?.message_id;
 
-          // ۲. تولید پاسخ با هوش مصنوعی و زنجیره ۷ مدل
           const chatResult = await chat.processMessage(chatId, userId, text, senderName);
           let replyText = chatResult.text;
           if (chatResult.sources && chatResult.sources.length > 0) {
             replyText += "\n\n📚 **منابع:**\n" + chatResult.sources.map(s => typeof s === 'string' ? `• ${s}` : `• [${s.title}](${s.url})`).join("\n");
           }
 
-          // ۳. تبدیل همان پیام اولیه به پاسخ نهایی به صورت کاملاً نرم و پویا
           if (waitMsgId) {
             await editTgMessage(chatId, waitMsgId, replyText);
           } else {
@@ -408,6 +406,7 @@ export default {
 
         return new Response("OK");
       } catch (error) {
+        await storage.addLog(`Webhook error: ${error.message}`);
         return new Response(`Error: ${error.message}`, { status: 200 });
       }
     }

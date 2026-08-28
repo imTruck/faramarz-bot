@@ -8,13 +8,29 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
     throw new Error("کلید Gemini تنظیم نشده است.");
   }
 
-  // ساخت زنجیره اولویت‌بندی مدل‌ها برای سوییچ خودکار در صورت لیمیت
-  const primary = model || CONFIG.DEFAULT_FALLBACK_CHAIN[0];
-  const candidateModels = [primary, ...CONFIG.DEFAULT_FALLBACK_CHAIN.filter(m => m !== primary)];
+  // لیست مدل‌های زنده و پایدار با اولویت بالا برای اطمینان از پاسخ‌دهی ۱۰۰٪ سریع
+  const defaultLiveModels = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-2.5-pro",
+    "gemini-1.5-pro"
+  ];
+
+  const primary = model || defaultLiveModels[0];
+  const candidateModels = [
+    primary,
+    ...CONFIG.DEFAULT_FALLBACK_CHAIN.filter(m => m !== primary),
+    ...defaultLiveModels.filter(m => m !== primary)
+  ];
+
+  // حذف موارد تکراری با حفظ ترتیب
+  const uniqueModels = [...new Set(candidateModels)];
 
   let lastError = null;
 
-  for (const targetModel of candidateModels) {
+  for (const targetModel of uniqueModels) {
     const cleanModel = targetModel.replace(/^models\//, "");
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${geminiKey}`;
 
@@ -31,8 +47,9 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
       }
     };
 
+    // در API v1beta گوگل ابزار سرچ با کلید استاندارد googleSearch ارسال می‌شود
     if (enableSearch && !cleanModel.includes("gemma")) {
-      payload.tools = [{ google_search: {} }];
+      payload.tools = [{ googleSearch: {} }];
     }
 
     if (systemPrompt) {
@@ -49,30 +66,44 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
       if (res.ok) {
         const data = await res.json();
         const candidate = data.candidates?.[0];
-        const text = candidate?.content?.parts?.[0]?.text || "پاسخی دریافت نشد.";
+        const text = candidate?.content?.parts?.[0]?.text;
 
-        const sources = [];
-        const metadata = candidate?.groundingMetadata;
-        if (metadata?.groundingChunks) {
-          for (const chunk of metadata.groundingChunks) {
-            if (chunk.web?.uri) {
-              sources.push({
-                title: chunk.web.title || "منبع",
-                url: chunk.web.uri
-              });
+        if (text) {
+          const sources = [];
+          const metadata = candidate?.groundingMetadata;
+          if (metadata?.groundingChunks) {
+            for (const chunk of metadata.groundingChunks) {
+              if (chunk.web?.uri) {
+                sources.push({
+                  title: chunk.web.title || "منبع",
+                  url: chunk.web.uri
+                });
+              }
             }
           }
+          return { text, sources, modelUsed: cleanModel };
         }
-
-        return { text, sources, modelUsed: cleanModel };
       }
 
-      // در صورت بروز خطای لیمیت (429) یا خطای سروری (503, 500, 404)
+      // در صورت خطای ابزار سرچ، تلاش بدون سرچ روی همان مدل
+      if (res.status === 400 && enableSearch) {
+        delete payload.tools;
+        const retryRes = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (retryRes.ok) {
+          const data = await retryRes.json();
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) return { text, sources: [], modelUsed: cleanModel };
+        }
+      }
+
       const errText = await res.text();
-      lastError = `مدل ${cleanModel} خطا داد (${res.status}): ${errText}`;
-      // ثبت در لاگ و تلاش با مدل بعدی در زنجیره
+      lastError = `[${cleanModel} -> ${res.status}]`;
       if (storage?.addLog) {
-        storage.addLog(`Failover: ${cleanModel} returned ${res.status}. Trying next model...`).catch(() => {});
+        storage.addLog(`Failover from ${cleanModel} (${res.status}): ${errText.slice(0, 100)}`).catch(() => {});
       }
       continue;
     } catch (netErr) {
@@ -81,8 +112,7 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
     }
   }
 
-  // اگر تمام مدل‌ها خطا دادند
-  throw new Error(`تمام مدل‌های زنجیره با خطا مواجه شدند. آخرین خطا: ${lastError}`);
+  throw new Error(`خطا در تمام مدل‌ها: ${lastError}`);
 }
 
 export async function callVision(imageDataUri, userPrompt, config, systemPrompt) {
@@ -90,7 +120,7 @@ export async function callVision(imageDataUri, userPrompt, config, systemPrompt)
   const geminiKey = await storage.getGeminiKey();
   if (!geminiKey) throw new Error("کلید Gemini تنظیم نشده است.");
 
-  const candidateModels = CONFIG.DEFAULT_FALLBACK_CHAIN;
+  const candidateModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
   const matches = imageDataUri.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
   if (!matches) throw new Error("فرمت تصویر نامعتبر است.");
 
