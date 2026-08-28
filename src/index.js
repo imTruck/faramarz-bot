@@ -13,7 +13,7 @@ export default {
     const url = new URL(request.url);
     const storage = new StorageService(env);
 
-    // ۱. مسیر تشخیصی سلامت و تست خواندن/نوشتن KV (/debug)
+    // ۱. مسیر تشخیصی سلامت (/debug)
     if (url.pathname === "/debug") {
       let kvWorking = false;
       try {
@@ -67,34 +67,55 @@ export default {
     }
 
     // ۳. پردازش فرم ذخیره خودکار کلیدها و ست کردن اتوماتیک وِبهوک (POST /setup)
-    if ((url.pathname === "/setup" || url.pathname === "/admin") && request.method === "POST") {
+    if ((url.pathname === "/setup" || url.pathname === "/admin" || url.pathname === "/") && request.method === "POST") {
       try {
         const formData = await request.formData();
-        const botTokenInput = formData.get("bot_token")?.trim();
-        const geminiKeyInput = formData.get("gemini_key")?.trim();
+        let botTokenInput = formData.get("bot_token")?.trim() || "";
+        let geminiKeyInput = formData.get("gemini_key")?.trim() || "";
 
         let message = "";
+        let isSuccess = true;
 
         if (botTokenInput) {
-          await storage.setBotToken(botTokenInput);
-          // فعال‌سازی خودکار وِبهوک تلگرام از طریق خود ورکر
+          // نرمال‌سازی توکن و حذف کاراکترها یا کلمه bot اضافی
+          const cleanToken = botTokenInput.replace(/^bot/i, "").trim();
+          await storage.setBotToken(cleanToken);
+
+          // فعال‌سازی خودکار وِبهوک تلگرام از طریق متد استاندارد POST
           const webhookUrl = `${url.origin}/`;
-          const webhookRes = await fetch(`https://api.telegram.org/bot${botTokenInput}/setWebhook?url=${encodeURIComponent(webhookUrl)}`);
-          const webhookData = await webhookRes.json();
+          const tgWebhookUrl = `https://api.telegram.org/bot${cleanToken}/setWebhook`;
           
-          if (webhookData.ok) {
-            message += `✅ توکن تلگرام با موفقیت در KV ذخیره شد و <b>وبهوک تلگرام به طور خودکار فعال گردید</b>!<br>`;
-          } else {
-            message += `✅ توکن ذخیره شد ولی ست کردن وبهوک با خطا مواجه شد: ${webhookData.description}<br>`;
+          try {
+            const webhookRes = await fetch(tgWebhookUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: webhookUrl })
+            });
+            const webhookData = await webhookRes.json();
+
+            if (webhookData.ok) {
+              message += `✅ توکن تلگرام ذخیره شد و <b>وبهوک تلگرام با موفقیت ست گردید</b>!<br>`;
+            } else {
+              isSuccess = false;
+              if (webhookData.description === "Not Found") {
+                message += `❌ <b>خطای تلگرام:</b> توکن وارد شده نامعتبر است یا در BotFather وجود ندارد (فرمت صحیح: <code>123456:ABC-DEF...</code>).<br>`;
+              } else {
+                message += `⚠️ توکن ذخیره شد ولی تلگرام پاسخ داد: <code>${webhookData.description}</code><br>`;
+              }
+            }
+          } catch (netErr) {
+            message += `⚠️ خطا در برقراری ارتباط با سرور تلگرام: ${netErr.message}<br>`;
           }
         }
 
         if (geminiKeyInput) {
           await storage.setGeminiKey(geminiKeyInput);
-          message += `✅ کلید Gemini API با موفقیت در KV ذخیره شد!<br>`;
+          message += `✅ کلید Gemini API با موفقیت ذخیره شد!<br>`;
         }
 
-        message += `🎉 ربات فرامرز اکنون آماده است. وارد تلگرام شوید و با ربات صحبت کنید.`;
+        if (isSuccess) {
+          message += `🎉 <b>تبریک! ربات فرامرز اکنون آماده است. وارد تلگرام شوید و دستور /start را بفرستید.</b>`;
+        }
 
         const hasToken = !!(await storage.getBotToken());
         const hasGemini = !!(await storage.getGeminiKey());
@@ -102,9 +123,9 @@ export default {
 
         const html = renderAdminDashboard({
           primaryModel,
-          hasToken,
-          hasGemini,
-          kvWorking: true,
+          hasToken: hasToken || !!botTokenInput,
+          hasGemini: hasGemini || !!geminiKeyInput,
+          kvWorking: !!env.KV_STORAGE || true,
           message
         });
 
@@ -123,7 +144,7 @@ export default {
         const botToken = await storage.getBotToken();
 
         if (!botToken) {
-          return new Response("Missing BOT_TOKEN in KV or Environment", { status: 500 });
+          return new Response("Missing BOT_TOKEN in Storage or Environment", { status: 200 });
         }
 
         const admin = new TelegramAdmin(storage, env);

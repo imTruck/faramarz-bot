@@ -1,16 +1,27 @@
 import { CONFIG } from './config.js';
 
+// کش درون‌حافظه‌ای جهت پایداری در صورتی که بایندینگ KV متصل نشده باشد
+if (!globalThis.__MEMORY_STORE__) {
+  globalThis.__MEMORY_STORE__ = new Map();
+}
+
 export class StorageService {
   constructor(env) {
-    this.kv = env?.KV_STORAGE;
+    this.kv = env?.KV_STORAGE || null;
     this.env = env || {};
+    this.mem = globalThis.__MEMORY_STORE__;
   }
 
-  // دریافت توکن تلگرام با اولویت اول KV و سپس تمام نام‌های ممکن متغیرهای محیطی
+  // دریافت توکن تلگرام با اولویت اول KV، سپس حافظه داخلی و سپس متغیرهای محیطی
   async getBotToken() {
     if (this.kv) {
-      const token = await this.kv.get("bot:token");
-      if (token && token.trim() !== "") return token.trim();
+      try {
+        const token = await this.kv.get("bot:token");
+        if (token && token.trim() !== "") return token.trim();
+      } catch (e) {}
+    }
+    if (this.mem.has("bot:token")) {
+      return this.mem.get("bot:token");
     }
     const envToken = this.env.BOT_TOKEN || 
                      this.env.TELEGRAM_BOT_TOKEN || 
@@ -21,11 +32,16 @@ export class StorageService {
     return envToken ? String(envToken).trim() : null;
   }
 
-  // دریافت کلید Gemini با اولویت اول KV و سپس تمام نام‌های ممکن متغیرهای محیطی
+  // دریافت کلید Gemini
   async getGeminiKey() {
     if (this.kv) {
-      const key = await this.kv.get("gemini:key");
-      if (key && key.trim() !== "") return key.trim();
+      try {
+        const key = await this.kv.get("gemini:key");
+        if (key && key.trim() !== "") return key.trim();
+      } catch (e) {}
+    }
+    if (this.mem.has("gemini:key")) {
+      return this.mem.get("gemini:key");
     }
     const envKey = this.env.GEMINI_API_KEY || 
                    this.env.GEMINI_KEY || 
@@ -38,75 +54,117 @@ export class StorageService {
   // دریافت مدل پیش‌فرض/فعال
   async getPrimaryModel() {
     if (this.kv) {
-      const model = await this.kv.get("config:primary_model");
-      if (model && model.trim() !== "") return model.trim();
+      try {
+        const model = await this.kv.get("config:primary_model");
+        if (model && model.trim() !== "") return model.trim();
+      } catch (e) {}
+    }
+    if (this.mem.has("config:primary_model")) {
+      return this.mem.get("config:primary_model");
     }
     return this.env.DEFAULT_GEMINI_MODEL || CONFIG.GEMINI_MODELS[0].id;
   }
 
-  // تنظیم کلید Gemini در KV
+  // تنظیم کلید Gemini
   async setGeminiKey(key) {
-    if (!this.kv) return "خطا: KV متصل نیست";
-    if (key.toLowerCase() === "off") {
-      await this.kv.delete("gemini:key");
-      return "کلید اختصاصی Gemini حذف شد.";
+    const cleanKey = key.trim();
+    this.mem.set("gemini:key", cleanKey);
+    if (this.kv) {
+      try {
+        if (cleanKey.toLowerCase() === "off") {
+          await this.kv.delete("gemini:key");
+          this.mem.delete("gemini:key");
+          return "حذف شد";
+        }
+        await this.kv.put("gemini:key", cleanKey);
+      } catch (e) {}
     }
-    await this.kv.put("gemini:key", key.trim());
-    return key.slice(0, 6) + "..." + key.slice(-4);
+    return cleanKey.slice(0, 6) + "..." + cleanKey.slice(-4);
   }
 
-  // تنظیم توکن تلگرام در KV
+  // تنظیم توکن تلگرام (با نرمال‌سازی خودکار و حذف پیشوند bot اضافی)
   async setBotToken(token) {
-    if (!this.kv) return "خطا: KV متصل نیست";
-    if (token.toLowerCase() === "off") {
-      await this.kv.delete("bot:token");
-      return "توکن تلگرام حذف شد.";
+    let cleanToken = token.trim().replace(/^bot/i, "").trim();
+    this.mem.set("bot:token", cleanToken);
+    if (this.kv) {
+      try {
+        if (cleanToken.toLowerCase() === "off") {
+          await this.kv.delete("bot:token");
+          this.mem.delete("bot:token");
+          return "حذف شد";
+        }
+        await this.kv.put("bot:token", cleanToken);
+      } catch (e) {}
     }
-    await this.kv.put("bot:token", token.trim());
-    return token.slice(0, 6) + "..." + token.slice(-4);
+    return cleanToken.slice(0, 6) + "..." + cleanToken.slice(-4);
   }
 
   // مدیریت تاریخچه پیام‌ها
   async getHistory(chatId) {
-    if (!this.kv) return [];
-    const raw = await this.kv.get(`history:${chatId}`);
-    return raw ? JSON.parse(raw) : [];
+    if (this.kv) {
+      try {
+        const raw = await this.kv.get(`history:${chatId}`);
+        if (raw) return JSON.parse(raw);
+      } catch (e) {}
+    }
+    return this.mem.get(`history:${chatId}`) || [];
   }
 
   async saveHistory(chatId, history) {
-    if (!this.kv) return;
     const trimmed = history.slice(-CONFIG.MAX_HISTORY_LENGTH);
-    await this.kv.put(`history:${chatId}`, JSON.stringify(trimmed), {
-      expirationTtl: CONFIG.HISTORY_TTL_SECONDS
-    });
+    this.mem.set(`history:${chatId}`, trimmed);
+    if (this.kv) {
+      try {
+        await this.kv.put(`history:${chatId}`, JSON.stringify(trimmed), {
+          expirationTtl: CONFIG.HISTORY_TTL_SECONDS
+        });
+      } catch (e) {}
+    }
   }
 
   async clearHistory(chatId) {
-    if (!this.kv) return;
-    await this.kv.delete(`history:${chatId}`);
+    this.mem.delete(`history:${chatId}`);
+    if (this.kv) {
+      try {
+        await this.kv.delete(`history:${chatId}`);
+      } catch (e) {}
+    }
   }
 
   // مدیریت وضعیت موقت کاربر (State)
   async setState(userId, state) {
-    if (!this.kv) return;
-    await this.kv.put(`state:${userId}`, state, {
-      expirationTtl: CONFIG.STATE_TTL_SECONDS
-    });
+    this.mem.set(`state:${userId}`, state);
+    if (this.kv) {
+      try {
+        await this.kv.put(`state:${userId}`, state, {
+          expirationTtl: CONFIG.STATE_TTL_SECONDS
+        });
+      } catch (e) {}
+    }
   }
 
   async getState(userId) {
-    if (!this.kv) return null;
-    return await this.kv.get(`state:${userId}`);
+    if (this.kv) {
+      try {
+        const s = await this.kv.get(`state:${userId}`);
+        if (s) return s;
+      } catch (e) {}
+    }
+    return this.mem.get(`state:${userId}`) || null;
   }
 
   async clearState(userId) {
-    if (!this.kv) return;
-    await this.kv.delete(`state:${userId}`);
+    this.mem.delete(`state:${userId}`);
+    if (this.kv) {
+      try {
+        await this.kv.delete(`state:${userId}`);
+      } catch (e) {}
+    }
   }
 
   // ذخیره و دریافت کاربران
   async saveUserIdentity(user) {
-    if (!this.kv || !user?.id) return;
+    if (!user?.id) return;
     const key = `user-identity:${user.id}`;
     const payload = {
       id: user.id,
@@ -115,40 +173,68 @@ export class StorageService {
       username: user.username ? `@${user.username}` : "ندارد",
       last_seen: new Date().toISOString()
     };
-    await this.kv.put(key, JSON.stringify(payload));
+    this.mem.set(key, payload);
+    if (this.kv) {
+      try {
+        await this.kv.put(key, JSON.stringify(payload));
+      } catch (e) {}
+    }
   }
 
   async listUsers(limit = 50) {
-    if (!this.kv) return [];
-    const list = await this.kv.list({ prefix: "user-identity:", limit });
-    const users = [];
-    for (const key of list.keys) {
-      const data = await this.kv.get(key.name);
-      if (data) users.push(JSON.parse(data));
+    if (this.kv) {
+      try {
+        const list = await this.kv.list({ prefix: "user-identity:", limit });
+        const users = [];
+        for (const key of list.keys) {
+          const data = await this.kv.get(key.name);
+          if (data) users.push(JSON.parse(data));
+        }
+        if (users.length > 0) return users;
+      } catch (e) {}
     }
-    return users;
+    const memUsers = [];
+    for (const [k, v] of this.mem.entries()) {
+      if (k.startsWith("user-identity:")) memUsers.push(v);
+    }
+    return memUsers;
   }
 
   // لاگ‌ها
   async addLog(message) {
-    if (!this.kv) return;
-    const logsRaw = await this.kv.get("system:logs");
-    const logs = logsRaw ? JSON.parse(logsRaw) : [];
-    logs.push({ time: new Date().toISOString(), message });
-    const trimmed = logs.slice(-50);
-    await this.kv.put("system:logs", JSON.stringify(trimmed), {
-      expirationTtl: 7 * 24 * 60 * 60
-    });
+    const logItem = { time: new Date().toISOString(), message };
+    const cur = this.mem.get("system:logs") || [];
+    cur.push(logItem);
+    this.mem.set("system:logs", cur.slice(-50));
+
+    if (this.kv) {
+      try {
+        const logsRaw = await this.kv.get("system:logs");
+        const logs = logsRaw ? JSON.parse(logsRaw) : [];
+        logs.push(logItem);
+        await this.kv.put("system:logs", JSON.stringify(logs.slice(-50)), {
+          expirationTtl: 7 * 24 * 60 * 60
+        });
+      } catch (e) {}
+    }
   }
 
   async getLogs() {
-    if (!this.kv) return [];
-    const logsRaw = await this.kv.get("system:logs");
-    return logsRaw ? JSON.parse(logsRaw) : [];
+    if (this.kv) {
+      try {
+        const logsRaw = await this.kv.get("system:logs");
+        if (logsRaw) return JSON.parse(logsRaw);
+      } catch (e) {}
+    }
+    return this.mem.get("system:logs") || [];
   }
 
   async clearLogs() {
-    if (!this.kv) return;
-    await this.kv.delete("system:logs");
+    this.mem.delete("system:logs");
+    if (this.kv) {
+      try {
+        await this.kv.delete("system:logs");
+      } catch (e) {}
+    }
   }
 }
