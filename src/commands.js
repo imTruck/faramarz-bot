@@ -48,32 +48,46 @@ export class CommandHandler {
     const cmd = parts[0].toLowerCase();
     const args = parts.slice(1).join(" ");
 
-    const sendMessage = async (replyText, replyMarkup = null, parseMode = "Markdown") => {
-      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: replyText,
-          parse_mode: parseMode,
-          reply_markup: replyMarkup
-        })
-      });
+    // تابع ارسال پیام کاملاً امن و ضد خطا (Safe Send)
+    const sendMessage = async (replyText, replyMarkup = null) => {
+      const payload = {
+        chat_id: chatId,
+        text: replyText,
+        reply_markup: replyMarkup
+      };
+
+      try {
+        let res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...payload, parse_mode: "Markdown" })
+        });
+        let data = await res.json();
+        
+        // اگر تلگرام به علت خطای مارک‌داون ریجکت کرد، بدون مارک‌داون بفرست
+        if (!data.ok) {
+          res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+        }
+      } catch (e) {}
     };
 
     // ۱. دستور /start
     if (cmd === "/start") {
-      const welcome = `سلام ${senderName} جان! رفیق، من **«${CONFIG.BOT_NAME}»** هستم. 😎🤝
+      const welcome = `سلام ${senderName} جان! رفیق، من «${CONFIG.BOT_NAME}» هستم. 😎🤝
 
 هر سوالی داری به زبان کاملاً طبیعی از من بپرس. از وضعیت آب‌وهوا و اخبار گرفته تا قیمت دلار و طلا، تحلیل عکس‌ها، برنامه‌نویسی و تحقیقات عمیق در خدمتم!
 
-🔹 **امکانات هوشمند و ویژه:**
-• 💬 **چت صمیمی و باهوش:** با حافظه پایدار و درک متون فارسی
-• ⚡ **موتور سرچ خودکار فوق‌سریع:** انتخاب هوشمند سریع‌ترین مدل برای پردازش سرچ
-• 📡 **کشف خودکار مدل‌های رایگان گوگل:** اسکن لحظه‌ای تمام مدل‌های جدید گوگل و ثبت در حافظه
-• 🔬 **موتور تحقیق ۳ سطحی:** ساده، قوی و عمیق
-• 📊 **قیمت‌های لحظه‌ای:** دلار، طلا، سکه و کریپتو
-• 🖼 **تحلیل تصویر:** ارسال عکس با کپشن برای توضیح و OCR
+🔹 امکانات هوشمند و ویژه:
+• 💬 چت صمیمی و باهوش با درک عمیق فارسی
+• ⚡ پاسخ‌دهی فوق‌سریع با مدل‌های پیشرفته Gemini Flash
+• 📡 کشف خودکار مدل‌های رایگان گوگل با دستور /scan
+• 🔬 موتور تحقیق ۳ سطحی (ساده، قوی و عمیق)
+• 📊 قیمت‌های لحظه‌ای بازار (دلار، طلا، سکه و کریپتو)
+• 🖼 تحلیل تصویر (ارسال عکس با توضیح)
 
 از کیبورد زیر یا منوی دستورات می‌تونی شروع کنی:`;
       await sendMessage(welcome, this.getMainKeyboard());
@@ -82,12 +96,12 @@ export class CommandHandler {
 
     // ۲. دکمه تحقیق یا دستور /research
     if (cmd === "🔬 تحقیق" || cmd === "/research") {
-      const textPrompt = `🔬 **بخش تحقیق تخصصی و عمیق فرامرز:**
+      const textPrompt = `🔬 بخش تحقیق تخصصی و عمیق فرامرز:
 
 لطفاً سطح تحقیق مورد نظرتان را انتخاب کنید:
-• **⚡ ساده:** سوال‌های سریع روزمره با مدل سریع
-• **🔬 قوی:** مسائل مقایسه‌ای و تحلیل‌های چندوجهی
-• **🚀 خیلی قوی:** تحقیق جامع، دانشگاهی و استنادی`;
+• ⚡ ساده: سوال‌های سریع روزمره
+• 🔬 قوی: مسائل مقایسه‌ای و تحلیل‌های چندوجهی
+• 🚀 خیلی قوی: تحقیق جامع و دانشگاهی`;
       await sendMessage(textPrompt, this.getResearchInlineKeyboard());
       return true;
     }
@@ -99,9 +113,9 @@ export class CommandHandler {
       return true;
     }
 
-    // ۴. دستور /scan یا دکمه اسکن مدل‌های رایگان (کشف زنده از گوگل + ثبت خودکار)
+    // ۴. دستور /scan یا دکمه اسکن مدل‌های رایگان
     if (cmd === "/scan" || cmd === "📡 اسکن مدل‌های رایگان" || cmd === "/syncmodels") {
-      await sendMessage("⏳ **در حال ارتباط با Google AI Studio و اسکن زنده تمامی مدل‌ها...**\n(مدل‌های رایگان و جدید به صورت خودکار ثبت می‌شوند)");
+      await sendMessage("⏳ در حال ارتباط با Google AI Studio و اسکن زنده تمامی مدل‌های رایگان...");
       
       const scanResult = await this.scanner.autoDiscoverAndScan();
       if (!scanResult.success) {
@@ -109,21 +123,21 @@ export class CommandHandler {
         return true;
       }
 
-      let rep = `📡 **گزارش اسکن و کشف زنده مدل‌های گوگل:**\n`;
-      rep += `• مجموع مدل‌های بررسی شده: **${scanResult.totalScanned} مدل**\n`;
-      rep += `• مدل‌های فعال و رایگان: **${scanResult.freeModels.length} مدل**\n\n`;
+      let rep = `📡 گزارش اسکن و کشف زنده مدل‌های گوگل:\n`;
+      rep += `• مجموع مدل‌های بررسی شده: ${scanResult.totalScanned} مدل\n`;
+      rep += `• مدل‌های فعال و رایگان: ${scanResult.freeModels.length} مدل\n\n`;
 
       if (scanResult.newlyDiscovered.length > 0) {
-        rep += `🎉 **مدل‌های جدید کشف و اضافه شده به ربات:**\n`;
+        rep += `🎉 مدل‌های جدید اضافه شده به ربات:\n`;
         scanResult.newlyDiscovered.forEach(n => {
-          rep += `✨ \`${n.id}\` (${n.name})\n`;
+          rep += `✨ ${n.id}\n`;
         });
         rep += `\n`;
       }
 
-      rep += `🟢 **لیست مدل‌های رایگان و آماده استفاده:**\n`;
+      rep += `🟢 لیست مدل‌های فعال و آماده استفاده:\n`;
       scanResult.freeModels.forEach((m, idx) => {
-        rep += `${idx + 1}. \`${m.id}\` — ${m.status}\n`;
+        rep += `${idx + 1}. ${m.id} — ${m.status}\n`;
       });
 
       await sendMessage(rep);
@@ -133,18 +147,15 @@ export class CommandHandler {
     // ۵. دستور /models و /models-list
     if (cmd === "/models" || cmd === "/models-list") {
       const active = await this.storage.getPrimaryModel();
-      const fastSearch = await this.modelManager.getFastSearchModel();
       const allModels = await this.modelManager.getAllAvailableModels();
 
-      let rep = `🔮 **مدل‌های متصل و آماده استفاده:**\n`;
-      rep += `• مدل اصلی چت: \`${active}\`\n`;
-      rep += `• مدل سریع جستجو: \`${fastSearch}\`\n\n`;
+      let rep = `🔮 مدل‌های متصل و آماده استفاده:\n`;
+      rep += `• مدل فعال فعلی: ${active}\n\n`;
 
       allModels.forEach((m, idx) => {
-        rep += `${idx + 1}. **${m.name}**\nشناسه: \`${m.id}\`\n\n`;
+        rep += `${idx + 1}. ${m.name}\nشناسه: ${m.id}\n\n`;
       });
 
-      rep += `_برای اسکن و افزودن جدیدترین مدل‌های رایگان گوگل دستور /scan را بفرستید._`;
       await sendMessage(rep);
       return true;
     }
@@ -152,7 +163,7 @@ export class CommandHandler {
     // ۶. دستور /search
     if (cmd === "/search") {
       if (!args) {
-        await sendMessage("لطفاً عبارت مورد نظر را وارد کنید:\nمثال: `/search هوش مصنوعی در سال ۲۰۲۶`");
+        await sendMessage("لطفاً عبارت مورد نظر را وارد کنید:\nمثال: /search هوش مصنوعی");
         return true;
       }
       const results = await this.search.searchDuckDuckGo(args);
@@ -160,9 +171,9 @@ export class CommandHandler {
         await sendMessage("نتیجه‌ای برای جستجوی شما یافت نشد.");
         return true;
       }
-      let rep = `🔍 **نتایج جستجو برای:** \`${args}\`\n\n`;
+      let rep = `🔍 نتایج جستجو برای: ${args}\n\n`;
       results.forEach((r, i) => {
-        rep += `${i + 1}. [${r.title}](${r.link})\n${r.snippet}\n\n`;
+        rep += `${i + 1}. ${r.title}\n${r.snippet}\n${r.link}\n\n`;
       });
       await sendMessage(rep);
       return true;
@@ -171,24 +182,24 @@ export class CommandHandler {
     // ۷. دستور /browse
     if (cmd === "/browse") {
       if (!args || !args.startsWith("http")) {
-        await sendMessage("لطفاً یک لینک معتبر ارسال کنید:\nمثال: `/browse https://fa.wikipedia.org`");
+        await sendMessage("لطفاً یک لینک معتبر ارسال کنید:\nمثال: /browse https://fa.wikipedia.org");
         return true;
       }
       const page = await this.browser.fetchAndClean(args);
-      await sendMessage(`🌐 **${page.title}**\n\n${page.content}`);
+      await sendMessage(`🌐 ${page.title}\n\n${page.content}`);
       return true;
     }
 
-    // ۸. دستورات حافظه (/memory, /remind, /forget)
+    // ۸. دستورات حافظه
     if (cmd === "/memory" || cmd === "💾 حافظه من") {
       const memContext = await this.memory.getMemoryContext(userId);
-      await sendMessage(`💾 **اطلاعات ثبت شده از شما در حافظه من:**\n\n${memContext || "هنوز نکته‌ای در حافظه ثبت نشده است. کافیست در چت خودتان را معرفی کنید یا از دستور /remind استفاده کنید."}`);
+      await sendMessage(`💾 اطلاعات ثبت شده از شما در حافظه من:\n\n${memContext || "هنوز نکته‌ای ثبت نشده است. در چت خودتان را معرفی کنید یا از /remind استفاده کنید."}`);
       return true;
     }
 
     if (cmd === "/remind") {
       if (!args) {
-        await sendMessage("لطفاً نکته مورد نظر را بنویسید:\nمثال: `/remind من به یادگیری زبان علاقه دارم`");
+        await sendMessage("لطفاً نکته مورد نظر را بنویسید:\nمثال: /remind من به یادگیری زبان علاقه دارم");
         return true;
       }
       await this.memory.addFact(userId, args);
@@ -208,15 +219,12 @@ export class CommandHandler {
       const botTokenSet = !!(await this.storage.getBotToken());
       const geminiSet = !!(await this.storage.getGeminiKey());
       const activeModel = await this.storage.getPrimaryModel();
-      const fastSearchModel = await this.modelManager.getFastSearchModel();
 
-      const rep = `⚡ **وضعیت سلامت ربات فرامرز:**
+      const rep = `⚡ وضعیت سلامت ربات فرامرز:
 • سرویس: Cloudflare Workers (Edge Global)
-• پایگاه داده: Cloudflare KV Storage
 • توکن ربات: ${botTokenSet ? 'متصل ✅' : 'ناموجود ❌'}
 • کلید Gemini: ${geminiSet ? 'فعال ✅' : 'ناموجود ❌'}
-• مدل اصلی مکالمه: \`${activeModel}\`
-• مدل هوشمند و سریع سرچ: \`${fastSearchModel}\``;
+• مدل فعال: ${activeModel}`;
       await sendMessage(rep);
       return true;
     }
@@ -230,25 +238,25 @@ export class CommandHandler {
 
     // ۱۱. دستور /help و دکمه راهنما
     if (cmd === "/help" || cmd === "❓ راهنما") {
-      const help = `📖 **راهنمای جامع دستورات فرامرز:**
+      const help = `📖 راهنمای دستورات فرامرز:
 
 • /start — شروع کار و بازنشانی کیبورد
-• /scan — اسکن زنده، کشف و ثبت تمام مدل‌های رایگان گوگل
-• /models — لیست تمامی مدل‌های فعال و کشف‌شده
-• /price یا /rate — مشاهده قیمت‌های لحظه‌ای بازار
+• /scan — اسکن و ثبت تمام مدل‌های رایگان گوگل
+• /models — لیست تمامی مدل‌های متصل
+• /price — مشاهده قیمت‌های لحظه‌ای طلا، ارز و کریپتو
 • /research — ورود به بخش تحقیق تخصصی ۳ سطحی
 • /search <عبارت> — جستجو در وب
 • /browse <آدرس وب> — استخراج متن صفحه اینترنتی
-• /memory — مشاهده موارد ثبت‌شده در حافظه
+• /memory — مشاهده حافظه من
 • /remind <نکته> — افزودن یادآوری به حافظه
-• /forget — پاک‌کردن کامل حافظه و تاریخچه
-• /status — وضعیت سرور، کلیدها و مدل‌های فعال
-• /clear — پاکسازی تاریخچه مکالمه جاری
+• /forget — پاک‌کردن حافظه
+• /status — وضعیت سرور و کلیدها
+• /clear — پاکسازی تاریخچه مکالمه
 
-👑 **دستورات ویژه مالک:**
-• /admin — ورود به پنل اینلاین مدیریت
-• /settoken <توکن> — تنظیم فوری توکن تلگرام در KV
-• /setgemini <کلید> — تنظیم فوری کلید جمینای در KV`;
+👑 دستورات ویژه مالک:
+• /admin — ورود به پنل مدیریت
+• /settoken <توکن> — تنظیم فوری توکن تلگرام
+• /setgemini <کلید> — تنظیم فوری کلید جمینای`;
       await sendMessage(help);
       return true;
     }

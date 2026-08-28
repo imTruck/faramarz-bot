@@ -8,24 +8,21 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
     throw new Error("کلید Gemini تنظیم نشده است.");
   }
 
-  // لیست مدل‌های زنده و پایدار با اولویت بالا برای اطمینان از پاسخ‌دهی ۱۰۰٪ سریع
-  const defaultLiveModels = [
-    "gemini-2.5-flash",
+  // مدل‌های رسمی و فوق‌سریع تایید شده گوگل
+  const provenModels = [
     "gemini-2.0-flash",
     "gemini-1.5-flash",
     "gemini-2.0-flash-lite",
-    "gemini-2.5-pro",
     "gemini-1.5-pro"
   ];
 
-  const primary = model || defaultLiveModels[0];
+  const primary = model || provenModels[0];
   const candidateModels = [
     primary,
-    ...CONFIG.DEFAULT_FALLBACK_CHAIN.filter(m => m !== primary),
-    ...defaultLiveModels.filter(m => m !== primary)
+    ...provenModels.filter(m => m !== primary),
+    ...CONFIG.DEFAULT_FALLBACK_CHAIN.filter(m => m !== primary && !provenModels.includes(m))
   ];
 
-  // حذف موارد تکراری با حفظ ترتیب
   const uniqueModels = [...new Set(candidateModels)];
 
   let lastError = null;
@@ -47,7 +44,6 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
       }
     };
 
-    // در API v1beta گوگل ابزار سرچ با کلید استاندارد googleSearch ارسال می‌شود
     if (enableSearch && !cleanModel.includes("gemma")) {
       payload.tools = [{ googleSearch: {} }];
     }
@@ -85,8 +81,8 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
         }
       }
 
-      // در صورت خطای ابزار سرچ، تلاش بدون سرچ روی همان مدل
-      if (res.status === 400 && enableSearch) {
+      // اگر با ابزار سرچ خطا داد، همان مدل را بدون سرچ صدا بزن
+      if (enableSearch) {
         delete payload.tools;
         const retryRes = await fetch(url, {
           method: "POST",
@@ -101,10 +97,7 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
       }
 
       const errText = await res.text();
-      lastError = `[${cleanModel} -> ${res.status}]`;
-      if (storage?.addLog) {
-        storage.addLog(`Failover from ${cleanModel} (${res.status}): ${errText.slice(0, 100)}`).catch(() => {});
-      }
+      lastError = `${cleanModel}: ${res.status}`;
       continue;
     } catch (netErr) {
       lastError = netErr.message;
@@ -112,7 +105,7 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
     }
   }
 
-  throw new Error(`خطا در تمام مدل‌ها: ${lastError}`);
+  throw new Error(`خطای ارتباط با هوش مصنوعی (${lastError})`);
 }
 
 export async function callVision(imageDataUri, userPrompt, config, systemPrompt) {
@@ -120,7 +113,7 @@ export async function callVision(imageDataUri, userPrompt, config, systemPrompt)
   const geminiKey = await storage.getGeminiKey();
   if (!geminiKey) throw new Error("کلید Gemini تنظیم نشده است.");
 
-  const candidateModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+  const candidateModels = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
   const matches = imageDataUri.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
   if (!matches) throw new Error("فرمت تصویر نامعتبر است.");
 
@@ -161,5 +154,5 @@ export async function callVision(imageDataUri, userPrompt, config, systemPrompt)
     }
   }
 
-  throw new Error("تحلیل تصویر با تمام مدل‌ها با خطا مواجه شد.");
+  throw new Error("تحلیل تصویر ناموفق بود.");
 }
