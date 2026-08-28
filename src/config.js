@@ -4,27 +4,33 @@ export const CONFIG = {
   OWNER_ID: 6695218234,
   OWNER_USERNAME: "Bxiqm",
 
-  // سریع‌ترین مدل پیش‌فرض برای پردازش و سنتز جستجوها
-  FAST_SEARCH_MODEL: "gemini-2.5-flash",
+  // سریع‌ترین مدل پیش‌فرض
+  FAST_SEARCH_MODEL: "gemini-3.5-flash",
 
-  // ۱۶ مدل پایه و پیش‌فرض Gemini
+  // زنجیره مدل‌های پیش‌فرض با قابلیت سوییچ خودکار (Failover Chain)
+  // در صورتی که مدلی لیمیت (429) یا خطا بخورد، فوراً به مدل بعدی در این لیست سوییچ می‌شود
+  DEFAULT_FALLBACK_CHAIN: [
+    "gemini-3.5-flash",
+    "gemini-3.6-flash",
+    "gemini-2.5-flash",
+    "gemini-3.7-flash",
+    "gemini-3-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite"
+  ],
+
+  // لیست مدل‌های قابل انتخاب
   GEMINI_MODELS: [
-    { id: "gemini-2.5-flash", name: "⚡ Gemini 2.5 Flash (فوق‌سریع & پیش‌فرض)" },
+    { id: "gemini-3.5-flash", name: "⚡ Gemini 3.5 Flash (اولویت ۱)" },
+    { id: "gemini-3.6-flash", name: "⚡ Gemini 3.6 Flash (اولویت ۲)" },
+    { id: "gemini-2.5-flash", name: "⚡ Gemini 2.5 Flash (اولویت ۳)" },
+    { id: "gemini-3.7-flash", name: "⚡ Gemini 3.7 Flash (اولویت ۴)" },
+    { id: "gemini-3-flash", name: "⚡ Gemini 3 Flash (اولویت ۵)" },
+    { id: "gemini-3.1-flash-lite", name: "🪶 Gemini 3.1 Flash Lite (اولویت ۶)" },
+    { id: "gemini-3.5-flash-lite", name: "🪶 Gemini 3.5 Flash Lite (اولویت ۷)" },
     { id: "gemini-2.5-pro", name: "🧠 Gemini 2.5 Pro" },
-    { id: "gemini-2.0-flash", name: "⚡ Gemini 2.0 Flash" },
-    { id: "gemini-2.0-flash-lite", name: "🪶 Gemini 2.0 Flash Lite (کم‌مصرف)" },
-    { id: "gemini-1.5-pro", name: "🏛 Gemini 1.5 Pro" },
-    { id: "gemini-1.5-flash", name: "⚡ Gemini 1.5 Flash" },
-    { id: "deep-research-pro-preview-12-2025", name: "🔬 Deep Research Pro (12-2025)" },
-    { id: "deep-research-max-preview-04-2026", name: "🚀 Deep Research Max (04-2026)" },
-    { id: "deep-research-lite-preview", name: "🧪 Deep Research Lite" },
-    { id: "antigravity-alpha-01", name: "🌌 Antigravity Agent Core" },
-    { id: "robotics-er-v1", name: "🤖 Robotics ER v1" },
-    { id: "robotics-er-v2-pro", name: "🦾 Robotics ER v2 Pro" },
-    { id: "robotics-er-spatial", name: "📐 Robotics Spatial" },
-    { id: "gemma-2-27b-it", name: "💎 Gemma 2 27B IT" },
-    { id: "gemma-2-9b-it", name: "💎 Gemma 2 9B IT" },
-    { id: "gemma-3-preview", name: "🔮 Gemma 3 Preview" }
+    { id: "deep-research-pro-preview-12-2025", name: "🔬 Deep Research Pro" },
+    { id: "deep-research-max-preview-04-2026", name: "🚀 Deep Research Max" }
   ],
 
   // سطوح سه‌گانه تحقیق
@@ -32,30 +38,26 @@ export const CONFIG = {
     simple: {
       id: "simple",
       title: "⚡ تحقیق ساده",
-      model: "gemini-2.5-flash",
-      desc: "سوال‌های معمولی، سریع و روزمره"
+      model: "gemini-3.5-flash",
+      desc: "پاسخ‌های سریع و روزمره"
     },
     strong: {
       id: "strong",
       title: "🔬 تحقیق قوی",
       model: "deep-research-pro-preview-12-2025",
-      desc: "تحلیل مقایسه‌ای و پردازش نیمه‌پیچیده"
+      desc: "تحلیل مقایسه‌ای و پردازش چندمنبعی"
     },
     max: {
       id: "max",
       title: "🚀 تحقیق خیلی قوی",
       model: "deep-research-max-preview-04-2026",
-      desc: "عمیق، دقیق و استنادی جامع"
+      desc: "بررسی جامع و عمیق دانشگاهی"
     }
   },
 
   SYSTEM_PROMPT: `تو «فرامرز» هستی؛ یک رفیق باهوش، صمیمی، کاربلد و مشتی ایرانی.
 لحن تو کاملاً خودمانی، دوستانه و در عین حال آگاهانه و محترمانه است.
-از اصطلاحات و زبان روزمره فارسی استفاده کن و به هیچ وجه خشک و رباتیک حرف نزن.
-قوانین کلیدی:
-۱. اگر کاربر سوالی پرسید که به اطلاعات زنده روز (نرخ ارز، طلا، سکه، اخبار جدید یا رویدادها) نیاز دارد، فوراً عبارت [[SEARCH:عبارت جستجو]] را در پاسخت قرار بده تا سیستم با سریع‌ترین مدل هوشمند جستجو کند.
-۲. اگر کاربر خود یا ترجیحاتش را معرفی کرد، آن‌ها را به یاد بسپار.
-۳. در گروه‌ها، شوخ‌طبع، باصفا و یاری‌رسان باش و به نام دوستان توجه کن.`,
+از اصطلاحات و زبان روزمره فارسی استفاده کن و به هیچ وجه خشک و رباتیک حرف نزن.`,
 
   MAX_HISTORY_LENGTH: 20,
   MAX_FACTS_LIMIT: 20,
