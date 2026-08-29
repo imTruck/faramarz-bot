@@ -17,11 +17,11 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
     "gemini-1.5-pro"
   ];
 
-  const primary = model || provenModels[0];
+  const primary = model || CONFIG.DEFAULT_FALLBACK_CHAIN[0];
   const candidateModels = [
     primary,
-    ...provenModels.filter(m => m !== primary),
-    ...CONFIG.DEFAULT_FALLBACK_CHAIN.filter(m => m !== primary && !provenModels.includes(m))
+    ...CONFIG.DEFAULT_FALLBACK_CHAIN.filter(m => m !== primary),
+    ...provenModels.filter(m => m !== primary && !CONFIG.DEFAULT_FALLBACK_CHAIN.includes(m))
   ];
 
   const uniqueModels = [...new Set(candidateModels)];
@@ -64,7 +64,6 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
         const data = await res.json();
         const candidate = data.candidates?.[0];
         
-        // استخراج صحیح و کامل متن از تمام بخش‌های پاسخ (شامل متن‌های چندپارتی و خروجی‌های پس از فکر)
         const parts = candidate?.content?.parts || [];
         const textParts = parts.filter(p => typeof p.text === 'string').map(p => p.text.trim()).filter(Boolean);
         const text = textParts.join("\n\n");
@@ -86,7 +85,6 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
         }
       }
 
-      // در صورت بروز خطا در ابزار سرچ، تلاش بدون سرچ روی همان مدل
       if (enableSearch) {
         delete payload.tools;
         const retryRes = await fetch(url, {
@@ -120,11 +118,22 @@ export async function callVision(imageDataUri, userPrompt, config, systemPrompt)
   const geminiKey = await storage.getGeminiKey();
   if (!geminiKey) throw new Error("کلید Gemini تنظیم نشده است.");
 
-  const candidateModels = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
-  const matches = imageDataUri.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
-  if (!matches) throw new Error("فرمت تصویر نامعتبر است.");
+  const visionModels = [
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-2.5-flash",
+    "gemini-1.5-pro"
+  ];
 
-  for (const targetModel of candidateModels) {
+  const matches = imageDataUri.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+  if (!matches) throw new Error("فرمت دیتای تصویر ارسالی نامعتبر است.");
+
+  const mimeType = matches[1];
+  const base64Data = matches[2];
+
+  let lastVisionError = null;
+
+  for (const targetModel of visionModels) {
     const cleanModel = targetModel.replace(/^models\//, "");
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${geminiKey}`;
 
@@ -133,8 +142,15 @@ export async function callVision(imageDataUri, userPrompt, config, systemPrompt)
         {
           role: "user",
           parts: [
-            { inlineData: { mimeType: matches[1], data: matches[2] } },
-            { text: userPrompt || "این تصویر را تحلیل و متون آن را بخوان." }
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: base64Data
+              }
+            },
+            {
+              text: userPrompt || "این تصویر را با دقت کامل بررسی کن و متون و جزئیات آن را بخوان."
+            }
           ]
         }
       ]
@@ -158,11 +174,15 @@ export async function callVision(imageDataUri, userPrompt, config, systemPrompt)
         const text = parts.filter(p => typeof p.text === 'string').map(p => p.text.trim()).filter(Boolean).join("\n\n");
         if (text) return text;
       }
+
+      const errText = await res.text();
+      lastVisionError = `${cleanModel} (${res.status}): ${errText.slice(0, 100)}`;
       continue;
     } catch (e) {
+      lastVisionError = e.message;
       continue;
     }
   }
 
-  throw new Error("تحلیل تصویر ناموفق بود.");
+  throw new Error(`خطای پردازش تصویر: ${lastVisionError}`);
 }
