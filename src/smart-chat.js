@@ -13,31 +13,27 @@ export class SmartChat {
     this.modelManager = new ModelManager(storage);
   }
 
-  // تشخیص دقیق و صرفاً صریح قصد تحقیق/سرچ
-  detectSearchIntent(text) {
-    if (!text) return null;
+  // مسیریاب معنایی هوشمند: تشخیص خودکار نیاز به اطلاعات زنده وب
+  needsLiveWebSearch(text) {
+    if (!text) return false;
     const clean = text.trim();
 
-    // فقط الگوهای کاملاً صریح تحقیق/سرچ
-    const explicitPatterns = [
-      /(?:راجب|درباره|در\s+مورد|درخصوص)\s+(.+?)\s+(?:تحقیق\s+کن|سرچ\s+کن|جستجو\s+کن)/i,
-      /(?:تحقیق\s+کن|سرچ\s+کن|جستجو\s+کن)\s+(?:راجب|درباره|در\s+مورد)\s+(.+)/i,
-      /(?:تحقیق\s+کن|سرچ\s+کن|جستجو\s+کن)\s+(?:رو|روی|درمورد)\s+(.+)/i,
-      /^(?:تحقیق|سرچ|جستجو)\s+(?:درباره|راجب|در\s+مورد)\s+(.+)/i,
-      /^(?:تحقیق\s+درباره|سرچ\s+درباره)\s+(.+)/i
+    // ۱. کلمات نشان‌دهنده زمان حال، رویدادهای زنده، قیمت، اخبار یا تحقیق
+    const liveKeywords = [
+      "امروز", "دیروز", "دیشب", "جدیدترین", "آخرین", "اخبار", "خبر",
+      "قیمت", "نرخ", "تورم", "سکه", "طلا", "دلار", "بیتکوین", "ارز دیجیتال",
+      "آب و هوا", "هواشناسی", "بارش", "دما",
+      "رئیس جمهور", "وزیر", "مجلس", "انتخابات", "جنگ", "فوتبال", "نتیجه بازی",
+      "تحقیق", "سرچ", "جستجو", "پژوهش", "کیست", "چیست", "کجاست"
     ];
 
-    for (const pattern of explicitPatterns) {
-      const match = clean.match(pattern);
-      if (match && match[1]) {
-        return match[1].replace(/[؟!.,،]+/g, "").trim();
-      }
-    }
+    const hasLiveKeyword = liveKeywords.some(kw => clean.includes(kw));
+    const isQuestion = clean.includes("؟") || clean.includes("?") || /^(کی|چی|کجا|چرا|چگونه|چطور|آیا)\s+/i.test(clean);
 
-    return null;
+    return hasLiveKeyword || isQuestion;
   }
 
-  // استخراج خودکار فکت‌ها در چت
+  // استخراج فکت‌های هویتی در جریان چت
   async autoExtractFacts(userId, text) {
     if (!text) return;
     const nameMatch = text.match(/(?:من|اسمم|نامم)\s+([آ-یa-zA-Z]+)\s+(?:هستم|هست|بودم)/);
@@ -50,44 +46,44 @@ export class SmartChat {
     }
   }
 
-  // اجرای سرچ انتخابی کاربر با ۲ مدل مشخص شده
-  async executeSearchMode(chatId, userId, query, modeKey = "fast") {
-    const isDeep = (modeKey === "deep");
-    const targetModel = isDeep 
-      ? "models/deep-research-max-preview-04-2026" 
-      : "gemini-2.5-flash-lite";
+  // تولید گزارش عمیق، ساختاریافته و تحلیلی با مدل Gemini Pro
+  async executeDeepReport(chatId, userId, query) {
+    const deepPrompt = `${CONFIG.SYSTEM_PROMPT}
 
-    const title = isDeep 
-      ? "🚀 گزارش سرچ عمیق (Deep Research Max)" 
-      : "⚡ گزارش سرچ سریع (Gemini 2.5 Flash Lite)";
-
-    const systemPrompt = isDeep 
-      ? `${CONFIG.SYSTEM_PROMPT}\n\nدستور ویژه: این یک تحقیق عمیق و موشکافانه است. تمام جوانب موضوع، حقایق کلیدی، پیشینه، آمارها و تحلیل‌های مرتبط را به همراه مراجع کامل وب بنویس.`
-      : `${CONFIG.SYSTEM_PROMPT}\n\nدستور ویژه: این یک تحقیق سریع است. نکات مهم، خلاصه ماجرا و اطلاعات اساسی را روان، صمیمی و سریع بنویس.`;
+دستور ویژه تولید گزارش جامع و دانشگاهی (Deep Research Mode):
+درباره موضوع «${query}»، یک گزارش عمیق، موشکافانه، ساختاریافته و همه‌جانبه آماده کن.
+قالب‌بندی و الزامات پاسخ:
+۱. مقدمه و تعریف کلیدی موضوع
+۲. پیشینه، تاریخچه و ریشه‌ها
+۳. تحلیل ابعاد اصلی و نکات مهم (با بولت‌پوینت‌های دقیق)
+۴. جدول مقایسه‌ای یا آماری (در صورت ارتباط با موضوع)
+۵. پیامدها، آینده و نتیجه‌گیری کاربردی
+۶. لحن خودمانی ولی بسیار آگاهانه و معتبر
+از جستجوی وب برای درج اطلاعات دقیق و مراجع استفاده کن.`;
 
     const messages = [
-      { role: "user", content: `تحقیق و بررسی کامل درباره موضوع زیر:\n${query}` }
+      { role: "user", content: `تولید تحقیق و گزارش عمیق و جامع درباره: ${query}` }
     ];
 
-    // در حالت سرچ، ابزار جستجوی گوگل فعال است
-    const result = await callAI(messages, { model: targetModel, storage: this.storage }, systemPrompt, true);
+    const primaryProModel = CONFIG.DEEP_RESEARCH_MODELS[0];
+    const result = await callAI(messages, { model: primaryProModel, storage: this.storage }, deepPrompt, true);
 
     return {
-      title,
-      text: `${title}:\n\n${result.text}`,
+      title: `🚀 گزارش تحلیلی و عمیق فرامرز: «${query}»`,
+      text: `🚀 **تحقیق و گزارش عمیق درباره «${query}»:**\n\n${result.text}`,
       sources: result.sources || [],
-      modelUsed: result.modelUsed || targetModel
+      modelUsed: result.modelUsed || primaryProModel
     };
   }
 
-  // پردازش مکالمه و چت ساده با زنجیره ۵ مدل Flash (بدون تاخیر سرچ و کاملاً سریع)
+  // پردازش اصلی مکالمه با پاسخ فوق‌سریع و منبع‌یابی خودکار
   async processMessage(chatId, userId, userMessage, senderName = "کاربر") {
     this.autoExtractFacts(userId, userMessage).catch(() => {});
 
-    // پاسخ آنی به قیمت‌های لحظه‌ای
+    // پاسخ آنی به قیمت‌ها از کش
     const livePriceCheck = await this.liveInfo.checkQuickTriggers(userMessage);
     if (livePriceCheck.isHandled) {
-      return { text: livePriceCheck.response, sources: [] };
+      return { text: livePriceCheck.response, sources: [], shouldShowDeepButton: false };
     }
 
     const [history, userMemory, primaryModel] = await Promise.all([
@@ -100,7 +96,7 @@ export class SmartChat {
 
     const dynamicSystemPrompt = `${CONFIG.SYSTEM_PROMPT}
 
-[کانتکست کاربر (${senderName})]:
+[کانتکست و مشخصات کاربر (${senderName})]:
 ${userMemory || "ندارد"}`;
 
     const messages = [
@@ -108,13 +104,15 @@ ${userMemory || "ندارد"}`;
       { role: "user", content: `${senderName}: ${userMessage}` }
     ];
 
+    // بررسی هوشمند نیاز به ابزار سرچ در چت
+    const enableSearch = this.needsLiveWebSearch(userMessage);
+
     let result = { text: "", sources: [] };
     try {
-      // در صحبت ساده، سرچ گوگل خاموش است تا پاسخ فوق‌سریع و مستقیم داده شود
       result = await callAI(messages, {
         model: primaryModel,
         storage: this.storage
-      }, dynamicSystemPrompt, false);
+      }, dynamicSystemPrompt, enableSearch);
     } catch (err) {
       result.text = `رفیق متاسفانه ارتباط با سرور هوش مصنوعی برقرار نشد (${err.message})، دوباره بفرست در خدمتم!`;
     }
@@ -123,6 +121,14 @@ ${userMemory || "ندارد"}`;
     history.push({ role: "assistant", content: result.text });
     this.storage.saveHistory(chatId, history).catch(() => {});
 
-    return result;
+    // اگر پیام بیش از ۲ کلمه بود، امکان ساخت تحقیق عمیق فعال می‌شود
+    const shouldShowDeepButton = userMessage.trim().split(/\s+/).length >= 2 && !userMessage.startsWith("/");
+
+    return {
+      text: result.text,
+      sources: result.sources || [],
+      shouldShowDeepButton,
+      query: userMessage
+    };
   }
 }
