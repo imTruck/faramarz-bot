@@ -188,5 +188,5 @@ faramarz-bot/
 - **نام ربات:** فرامرز (Faramarz Bot)
 - **شناسه ربات در تلگرام:** [@faramarz_edited_bot](https://t.me/faramarz_edited_bot)
 - **مالک و توسعه‌دهنده:** [@Bxiqm](https://t.me/Bxiqm) (User ID: `6695218234`)
-- **مخزن گیت‌هاب:** [imTruck/faramarz-bot](https://github.com/imTruck/faramarz-bot)
+
 
