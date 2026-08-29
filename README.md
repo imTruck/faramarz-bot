@@ -190,8 +190,3 @@ faramarz-bot/
 - **مالک و توسعه‌دهنده:** [@Bxiqm](https://t.me/Bxiqm) (User ID: `6695218234`)
 - **مخزن گیت‌هاب:** [imTruck/faramarz-bot](https://github.com/imTruck/faramarz-bot)
 
----
-
-<div align="center">
-ساخته شده با ❤️ برای جامعه فارسی‌زبان و علاقه‌مندان به هوش مصنوعی
-</div>
