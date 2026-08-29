@@ -54,7 +54,7 @@ export default {
         },
         telegram_webhook: tgWebhookInfo,
         recent_logs: logs.slice(-15),
-        version: "3.0.0-dual-search"
+        version: "3.1.0-contextual-search-buttons"
       }, null, 2), {
         headers: { "Content-Type": "application/json; charset=utf-8" }
       });
@@ -123,7 +123,7 @@ export default {
       }
     }
 
-    // ۴. پردازش اصلی پیام‌های تلگرام
+    // ۴. پردازش اصلی پیام‌های تلگرام با دکمه‌های شیشه‌ای هوشمند برای تحقیق
     if (request.method === "POST") {
       const startTime = Date.now();
       try {
@@ -134,7 +134,7 @@ export default {
           return new Response("Missing BOT_TOKEN", { status: 200 });
         }
 
-        // ارسال لاگ ساختاریافته به پیوی مالک
+        // تابع ارسال لاگ ساختاریافته به پیوی مالک
         const sendOwnerLog = async (logText) => {
           try {
             await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -154,7 +154,7 @@ export default {
         const imageService = new ImageService(storage);
         const groupService = new GroupService(env.KV_STORAGE);
 
-        // ارسال پیام با مدیریت خودکار دکمه‌ها
+        // ارسال پیام با مدیریت ایمن دکمه‌ها
         const sendTgMessage = async (chatId, text, replyMarkup = null) => {
           const safeText = (text && typeof text === 'string' && text.trim().length > 0) ? text.trim() : "سلام رفیق!";
           const payload = { chat_id: chatId, text: safeText };
@@ -191,6 +191,39 @@ export default {
           }
         };
 
+        // ویرایش پیام تلگرام
+        const editTgMessage = async (chatId, messageId, text, replyMarkup = null) => {
+          const safeText = (text && typeof text === 'string' && text.trim().length > 0) ? text.trim() : "سلام رفیق!";
+          const payload = { chat_id: chatId, message_id: messageId, text: safeText };
+          if (replyMarkup && typeof replyMarkup === 'object') {
+            payload.reply_markup = replyMarkup;
+          }
+
+          try {
+            let res = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...payload, parse_mode: "Markdown" })
+            });
+            let data = await res.json();
+
+            if (!data.ok) {
+              res = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+              });
+              data = await res.json();
+
+              if (!data.ok) {
+                await sendTgMessage(chatId, safeText, replyMarkup);
+              }
+            }
+          } catch (e) {
+            await sendTgMessage(chatId, safeText, replyMarkup);
+          }
+        };
+
         // اکشن تایپینگ
         const targetChatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
         if (targetChatId) {
@@ -206,26 +239,61 @@ export default {
           const cb = update.callback_query;
           const data = cb.data;
           const chatId = cb.message.chat.id;
+          const messageId = cb.message.message_id;
           const userId = cb.from.id;
           const userName = [cb.from.first_name, cb.from.last_name].filter(Boolean).join(" ");
           const userTag = cb.from.username ? `@${cb.from.username}` : "ندارد";
+          const isGroup = cb.message.chat.type === "group" || cb.message.chat.type === "supergroup";
+          const groupTitle = isGroup ? (cb.message.chat.title || "گروه بدون نام") : null;
+          const locationInfo = isGroup ? `👥 گروه: «${groupTitle}» (ID: ${chatId})` : `👤 پیوی شخصی (Chat ID: ${chatId})`;
 
-          await sendOwnerLog(`🔘 [کلیک دکمه اینلاین]\n👤 کاربر: ${userName} (${userTag} | ID: ${userId})\n🔘 دکمه: ${data}\n📍 چت: ${chatId}`);
+          // اجرای مستقیم سرچ انتخابی از دکمه‌های موضوعی (srch_exec:mode:queryId)
+          if (data.startsWith("srch_exec:")) {
+            const parts = data.split(":");
+            const mode = parts[1]; // 'deep' یا 'fast'
+            const queryId = parts[2];
+            const searchTopic = (await storage.getState(`srch:${queryId}`)) || "موضوع درخواستی";
 
-          // انتخاب نوع سرچ (عمیق vs سریع)
+            const modelUsed = mode === "deep" ? "models/deep-research-max-preview-04-2026" : "gemini-2.5-flash-lite";
+
+            await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                callback_query_id: cb.id,
+                text: mode === "deep" ? "🚀 در حال انجام سرچ عمیق..." : "⚡ در حال انجام سرچ سریع..."
+              })
+            });
+
+            await editTgMessage(chatId, messageId, `⏳ *در حال بررسی و جستجو درباره «${searchTopic}»...*\n🔮 مدل: \`${modelUsed}\``);
+
+            await sendOwnerLog(`🔍 [کلیک دکمه تحقیق]\n👤 ${userName} (${userTag} | ID: ${userId})\n📍 ${locationInfo}\n🎯 حالت: ${mode === 'deep' ? 'عمیق (Deep Research Max)' : 'سریع (Gemini 2.5 Flash Lite)'}\n🔎 موضوع: "${searchTopic}"`);
+
+            const searchResult = await chat.executeSearchMode(chatId, userId, searchTopic, mode);
+            let responseText = searchResult.text;
+            if (searchResult.sources && searchResult.sources.length > 0) {
+              responseText += "\n\n📚 منابع:\n" + searchResult.sources.map(s => `• ${s.title}: ${s.url}`).join("\n");
+            }
+
+            await editTgMessage(chatId, messageId, responseText);
+            const elapsed = Date.now() - startTime;
+            await sendOwnerLog(`✅ [پاسخ تحقیق تحویل شد]\n📍 ${locationInfo}\n⏱ زمان: ${elapsed}ms`);
+            return new Response("OK");
+          }
+
           if (data.startsWith("search_mode:")) {
-            const mode = data.split(":")[1]; // 'deep' یا 'fast'
+            const mode = data.split(":")[1];
             await storage.setState(userId, `waiting_search:${mode}`);
 
             await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ callback_query_id: cb.id, text: "حالت سرچ انتخاب شد." })
+              body: JSON.stringify({ callback_query_id: cb.id, text: "حالت انتخاب شد." })
             });
 
             const promptMsg = mode === "deep"
-              ? `🚀 حالت سرچ طولانی و عمیق انتخاب شد:\nمدل: models/deep-research-max-preview-04-2026\n\nلطفاً موضوع یا سوال پژوهشی خود را ارسال کنید (مهلت: ۵ دقیقه):`
-              : `⚡ حالت سرچ سریع و فوری انتخاب شد:\nمدل: gemini-2.5-flash-lite\n\nلطفاً عبارت مورد نظر را برای جستجو ارسال کنید:`;
+              ? `🚀 حالت سرچ طولانی و عمیق انتخاب شد:\nمدل: models/deep-research-max-preview-04-2026\n\nلطفاً موضوع خود را بفرستید:`
+              : `⚡ حالت سرچ سریع و فوری انتخاب شد:\nمدل: gemini-2.5-flash-lite\n\nلطفاً عبارت مورد نظر را بفرستید:`;
 
             await sendTgMessage(chatId, promptMsg);
             return new Response("OK");
@@ -238,7 +306,7 @@ export default {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ callback_query_id: cb.id, text: "لغو شد." })
             });
-            await sendTgMessage(chatId, "عملیات جستجو لغو شد.");
+            await editTgMessage(chatId, messageId, "عملیات جستجو لغو شد.");
             return new Response("OK");
           }
 
@@ -327,14 +395,14 @@ export default {
           if (handled) return new Response("OK");
         }
 
-        // پردازش حالت سرچ انتخابی (عمیق vs سریع)
+        // بررسی حالت انتظار ورودی سرچ قبلی
         const userState = await storage.getState(userId);
         if (userState && userState.startsWith("waiting_search:")) {
-          const searchMode = userState.split(":")[1]; // 'deep' یا 'fast'
+          const searchMode = userState.split(":")[1];
           await storage.clearState(userId);
 
           const modelUsed = searchMode === "deep" ? "models/deep-research-max-preview-04-2026" : "gemini-2.5-flash-lite";
-          await sendOwnerLog(`🔍 [شروع جستجوی انتخابی]\n👤 ${senderFullName} (ID: ${userId})\n📍 ${locationInfo}\n🎯 حالت: ${searchMode === 'deep' ? 'عمیق و با جزئیات' : 'سریع و فوری'}\n🔮 مدل: ${modelUsed}\n❓ پرسش: "${text}"`);
+          await sendOwnerLog(`🔍 [شروع جستجوی انتخابی]\n👤 ${senderFullName} (ID: ${userId})\n📍 ${locationInfo}\n🎯 حالت: ${searchMode === 'deep' ? 'عمیق' : 'سریع'}\n🔮 مدل: ${modelUsed}\n❓ پرسش: "${text}"`);
 
           const searchResult = await chat.executeSearchMode(chatId, userId, text, searchMode);
           let responseText = searchResult.text;
@@ -344,7 +412,35 @@ export default {
 
           const sent = await sendTgMessage(chatId, responseText);
           const elapsed = Date.now() - startTime;
-          await sendOwnerLog(`✅ [جستجو تکمیل شد]\n📍 ${locationInfo}\n⏱ زمان: ${elapsed}ms\n📩 تحویل: ${sent ? 'موفق' : 'ناموفق'}`);
+          await sendOwnerLog(`✅ [جستجو تکمیل شد]\n📍 ${locationInfo}\n⏱ زمان: ${elapsed}ms`);
+          return new Response("OK");
+        }
+
+        // 🌟 تشخیص هوشمند درخواست تحقیق در متن پیام و ارسال فوری ۲ دکمه شیشه‌ای
+        const searchTopic = chat.detectSearchIntent(text);
+        if (searchTopic) {
+          const queryId = Math.random().toString(36).substring(2, 8);
+          await storage.setState(`srch:${queryId}`, searchTopic);
+
+          const inlineKeyboard = {
+            inline_keyboard: [
+              [
+                { text: "🚀 سرچ عمیق و با جزئیات", callback_data: `srch_exec:deep:${queryId}` }
+              ],
+              [
+                { text: "⚡ سرچ سریع و فوری", callback_data: `srch_exec:fast:${queryId}` }
+              ]
+            ]
+          };
+
+          const promptText = `🔎 موضوع تحقیق: «*${searchTopic}*»
+
+چطوری برات بررسی کنم رفیق؟
+۱. 🚀 *سرچ عمیق:* تحلیل جامع با مدل \`deep-research-max\`
+۲. ⚡ *سرچ سریع:* نکات کلیدی با مدل \`gemini-2.5-flash-lite\``;
+
+          await sendTgMessage(chatId, promptText, inlineKeyboard);
+          await sendOwnerLog(`💡 [تشخیص قصد تحقیق]\n👤 ${senderFullName} (ID: ${userId})\n📍 ${locationInfo}\n🔎 موضوع استخراج شده: "${searchTopic}"\n🔘 ۲ دکمه شیشه‌ای ارسال شد.`);
           return new Response("OK");
         }
 
@@ -368,10 +464,10 @@ export default {
           return new Response("OK");
         }
 
-        // چت متنی هوشمند (با اولویت مدل‌های Flash)
+        // چت متنی هوشمند (با اولویت ۵ مدل Flash)
         if (text) {
           const primaryModel = await storage.getPrimaryModel();
-          await sendOwnerLog(`📩 [پیام جدید چت]\n👤 ${senderFullName} (${senderUsername} | ID: ${userId})\n📍 ${locationInfo}\n💬 متن: "${text}"\n⚙️ مدل هدف: ${primaryModel}`);
+          await sendOwnerLog(`📩 [پیام چت]\n👤 ${senderFullName} (${senderUsername} | ID: ${userId})\n📍 ${locationInfo}\n💬 متن: "${text}"\n⚙️ مدل هدف: ${primaryModel}`);
 
           const chatResult = await chat.processMessage(chatId, userId, text, senderFullName);
           let replyText = chatResult.text;

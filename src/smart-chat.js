@@ -13,6 +13,36 @@ export class SmartChat {
     this.modelManager = new ModelManager(storage);
   }
 
+  // تشخیص هوشمند قصد تحقیق/سرچ و استخراج خودکار موضوع
+  detectSearchIntent(text) {
+    if (!text) return null;
+    const clean = text.trim();
+
+    // الگوهای رایج درخواست تحقیق در زبان فارسی
+    // مثال: "راجب قاسم سلیمانی تحقیق کن"، "درباره هوش مصنوعی سرچ کن"، "تحقیق کن درباره بیتکوین"
+    const patterns = [
+      /(?:راجب|درباره|در\s+مورد|درخصوص)\s+(.+?)\s+(?:تحقیق\s+کن|سرچ\s+کن|جستجو\s+کن|بگو|توضیح\s+بده|اطلاعات\s+بده)/i,
+      /(?:تحقیق\s+کن|سرچ\s+کن|جستجو\s+کن)\s+(?:راجب|درباره|در\s+مورد)\s+(.+)/i,
+      /(?:تحقیق\s+کن|سرچ\s+کن|جستجو\s+کن)\s+(?:رو|روی|درمورد)\s+(.+)/i,
+      /(?:تحقیق|سرچ|جستجو)\s+(?:درباره|راجب|در\s+مورد)\s+(.+)/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = clean.match(pattern);
+      if (match && match[1]) {
+        return match[1].replace(/[؟!.,،]+/g, "").trim();
+      }
+    }
+
+    // اگر پیام مستقیماً با "تحقیق" یا "سرچ" شروع شد
+    if (/^(?:تحقیق|سرچ|جستجو)\s+(.+)/i.test(clean)) {
+      const match = clean.match(/^(?:تحقیق|سرچ|جستجو)\s+(.+)/i);
+      if (match && match[1]) return match[1].trim();
+    }
+
+    return null;
+  }
+
   // استخراج نام و فکت‌ها
   async autoExtractFacts(userId, text) {
     if (!text) return;
@@ -26,33 +56,40 @@ export class SmartChat {
     }
   }
 
-  // اجرای سرچ اختصاصی انتخابی (عمیق با deep-research-max یا سریع با gemini-2.5-flash-lite)
+  // اجرای سرچ با مدل انتخابی کاربر
   async executeSearchMode(chatId, userId, query, modeKey = "fast") {
-    const searchConfig = CONFIG.SEARCH_MODELS[modeKey] || CONFIG.SEARCH_MODELS.fast;
-    const targetModel = searchConfig.model;
-
     const isDeep = (modeKey === "deep");
+    const targetModel = isDeep 
+      ? "models/deep-research-max-preview-04-2026" 
+      : "gemini-2.5-flash-lite";
+
+    const title = isDeep 
+      ? "🚀 گزارش تحقیق عمیق و جامع (Deep Research Max)" 
+      : "⚡ گزارش تحقیق سریع (Gemini 2.5 Flash Lite)";
+
     const systemPrompt = isDeep 
-      ? `${CONFIG.SYSTEM_PROMPT}\n\nدستور ویژه: این یک جستجوی تحلیلی و عمیق است. با دقت تمام منابع را بررسی کن، پاسخی جامع، دسته‌بندی‌شده و موشکافانه همراه با استناد دقیق ارائه کن.`
-      : `${CONFIG.SYSTEM_PROMPT}\n\nدستور ویژه: این یک جستجوی سریع است. نکات کلیدی و اطلاعات مهم را خلاصه، مفید، روان و سریع بیان کن.`;
+      ? `${CONFIG.SYSTEM_PROMPT}\n\nدستور ویژه: این یک تحقیق عمیق و موشکافانه است. تمام جوانب موضوع، حقایق کلیدی، پیشینه، آمارها و تحلیل‌های مرتبط را به همراه مراجع کامل بنویس.`
+      : `${CONFIG.SYSTEM_PROMPT}\n\nدستور ویژه: این یک تحقیق سریع است. نکات مهم، خلاصه ماجرا و اطلاعات اساسی را روان، صمیمی و سریع بنویس.`;
 
     const messages = [
-      { role: "user", content: `جستجو و بررسی دقیق درباره:\n${query}` }
+      { role: "user", content: `تحقیق و بررسی کامل درباره موضوع زیر:\n${query}` }
     ];
 
     const result = await callAI(messages, { model: targetModel, storage: this.storage }, systemPrompt, true);
 
     return {
-      text: `${searchConfig.title}:\n\n${result.text}`,
-      sources: result.sources || []
+      title,
+      text: `${title}:\n\n${result.text}`,
+      sources: result.sources || [],
+      modelUsed: result.modelUsed || targetModel
     };
   }
 
-  // پردازش اصلی پیام چت به صورت تک‌مرحله‌ای با زنجیره مدل‌های Flash
+  // پردازش اصلی چت متنی عادی با زنجیره اولویت Flash
   async processMessage(chatId, userId, userMessage, senderName = "کاربر") {
     this.autoExtractFacts(userId, userMessage).catch(() => {});
 
-    // بررسی سریع قیمت‌ها
+    // پاسخ به قیمت‌ها
     const livePriceCheck = await this.liveInfo.checkQuickTriggers(userMessage);
     if (livePriceCheck.isHandled) {
       return { text: livePriceCheck.response, sources: [] };
