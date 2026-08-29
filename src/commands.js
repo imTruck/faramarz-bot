@@ -22,7 +22,7 @@ export class CommandHandler {
   getMainKeyboard() {
     return {
       keyboard: [
-        [{ text: "🔬 تحقیق" }, { text: "📊 قیمت‌های لحظه‌ای" }],
+        [{ text: "🔍 سرچ و تحقیق" }, { text: "📊 قیمت‌های لحظه‌ای" }],
         [{ text: "📡 اسکن مدل‌های رایگان" }, { text: "💾 حافظه من" }],
         [{ text: "❓ راهنما" }]
       ],
@@ -30,14 +30,19 @@ export class CommandHandler {
     };
   }
 
-  // ارسال منوی سطوح تحقیق
-  getResearchInlineKeyboard() {
+  // ارسال منوی انتخاب نوع سرچ (عمیق vs سریع)
+  getSearchModeKeyboard() {
     return {
       inline_keyboard: [
-        [{ text: "⚡ تحقیق ساده (سریع)", callback_data: "research_tier:simple" }],
-        [{ text: "🔬 تحقیق قوی (تحلیلی)", callback_data: "research_tier:strong" }],
-        [{ text: "🚀 تحقیق خیلی قوی (عمیق و جامع)", callback_data: "research_tier:max" }],
-        [{ text: "❌ انصراف", callback_data: "research_cancel" }]
+        [
+          { text: "🚀 سرچ طولانی و با جزئیات (عمیق)", callback_data: "search_mode:deep" }
+        ],
+        [
+          { text: "⚡ سرچ سریع و فوری (خلاصه)", callback_data: "search_mode:fast" }
+        ],
+        [
+          { text: "❌ انصراف", callback_data: "search_cancel" }
+        ]
       ]
     };
   }
@@ -48,13 +53,12 @@ export class CommandHandler {
     const cmd = parts[0].toLowerCase();
     const args = parts.slice(1).join(" ");
 
-    // تابع ارسال پیام کاملاً امن و ضد خطا (Safe Send)
+    // تابع ارسال پیام کاملاً امن و ضد خطا
     const sendMessage = async (replyText, replyMarkup = null) => {
-      const payload = {
-        chat_id: chatId,
-        text: replyText,
-        reply_markup: replyMarkup
-      };
+      const payload = { chat_id: chatId, text: replyText };
+      if (replyMarkup && typeof replyMarkup === 'object') {
+        payload.reply_markup = replyMarkup;
+      }
 
       try {
         let res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -64,7 +68,6 @@ export class CommandHandler {
         });
         let data = await res.json();
         
-        // اگر تلگرام به علت خطای مارک‌داون ریجکت کرد، بدون مارک‌داون بفرست
         if (!data.ok) {
           res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: "POST",
@@ -81,41 +84,45 @@ export class CommandHandler {
 
 هر سوالی داری به زبان کاملاً طبیعی از من بپرس. از وضعیت آب‌وهوا و اخبار گرفته تا قیمت دلار و طلا، تحلیل عکس‌ها، برنامه‌نویسی و تحقیقات عمیق در خدمتم!
 
-🔹 امکانات هوشمند و ویژه:
-• 💬 چت صمیمی و باهوش با درک عمیق فارسی
-• ⚡ پاسخ‌دهی فوق‌سریع با مدل‌های پیشرفته Gemini Flash
-• 📡 کشف خودکار مدل‌های رایگان گوگل با دستور /scan
-• 🔬 موتور تحقیق ۳ سطحی (ساده، قوی و عمیق)
-• 📊 قیمت‌های لحظه‌ای بازار (دلار، طلا، سکه و کریپتو)
-• 🖼 تحلیل تصویر (ارسال عکس با توضیح)
+🔹 امکانات هوشمند:
+• 💬 چت هوشمند با زنجیره مدل‌های Gemini Flash
+• 🔍 سرچ دوگانه: سرچ عمیق و با جزئیات (Deep Research Max) یا سرچ سریع (Gemini Flash Lite)
+• 📊 قیمت‌های لحظه‌ای بازار (دلار، طلا، سکه، کریپتو)
+• 📡 اسکن و همگام‌سازی زنده مدل‌های رایگان گوگل
+• 🖼 تحلیل و ترجمه تصاویر
 
-از کیبورد زیر یا منوی دستورات می‌تونی شروع کنی:`;
+از کیبورد زیر یا منوی دستورات شروع کن:`;
       await sendMessage(welcome, this.getMainKeyboard());
       return true;
     }
 
-    // ۲. دکمه تحقیق یا دستور /research
-    if (cmd === "🔬 تحقیق" || cmd === "/research") {
-      const textPrompt = `🔬 بخش تحقیق تخصصی و عمیق فرامرز:
+    // ۲. دکمه سرچ و تحقیق یا دستور /search و /research
+    if (cmd === "🔍 سرچ و تحقیق" || cmd === "🔬 تحقیق" || cmd === "/search" || cmd === "/research") {
+      const promptText = `🔍 چه نوع سرچ یا تحقیقی مد نظرتان است؟
 
-لطفاً سطح تحقیق مورد نظرتان را انتخاب کنید:
-• ⚡ ساده: سوال‌های سریع روزمره
-• 🔬 قوی: مسائل مقایسه‌ای و تحلیل‌های چندوجهی
-• 🚀 خیلی قوی: تحقیق جامع و دانشگاهی`;
-      await sendMessage(textPrompt, this.getResearchInlineKeyboard());
+۱. 🚀 سرچ طولانی و با جزئیات (عمیق)
+مدل: models/deep-research-max-preview-04-2026
+کاربرد: بررسی جامع، تحلیل موشکافانه و استخراج کامل منابع وب
+
+۲. ⚡ سرچ سریع و فوری (خلاصه)
+مدل: gemini-2.5-flash-lite
+کاربرد: پاسخ فوق‌سریع در چند ثانیه و نکات کلیدی با منابع
+
+یکی از گزینه‌های زیر را انتخاب کنید:`;
+      await sendMessage(promptText, this.getSearchModeKeyboard());
       return true;
     }
 
-    // ۳. دستور /price و /rate و دکمه قیمت‌های لحظه‌ای
+    // ۳. دستور /price و دکمه قیمت‌های لحظه‌ای
     if (cmd === "/price" || cmd === "/rate" || cmd === "📊 قیمت‌های لحظه‌ای") {
       const live = await this.liveInfo.checkQuickTriggers("دلار طلا سکه بیتکوین");
       await sendMessage(live.response || "دریافت قیمت‌ها مقدور نشد.");
       return true;
     }
 
-    // ۴. دستور /scan یا دکمه اسکن مدل‌های رایگان
+    // ۴. دستور /scan
     if (cmd === "/scan" || cmd === "📡 اسکن مدل‌های رایگان" || cmd === "/syncmodels") {
-      await sendMessage("⏳ در حال ارتباط با Google AI Studio و اسکن زنده تمامی مدل‌های رایگان...");
+      await sendMessage("⏳ در حال اسکن زنده مدل‌های Google AI Studio...");
       
       const scanResult = await this.scanner.autoDiscoverAndScan();
       if (!scanResult.success) {
@@ -123,7 +130,7 @@ export class CommandHandler {
         return true;
       }
 
-      let rep = `📡 گزارش اسکن و کشف زنده مدل‌های گوگل:\n`;
+      let rep = `📡 گزارش اسکن مدل‌های فعال:\n`;
       rep += `• مجموع مدل‌های بررسی شده: ${scanResult.totalScanned} مدل\n`;
       rep += `• مدل‌های فعال و رایگان: ${scanResult.freeModels.length} مدل\n\n`;
 
@@ -135,7 +142,7 @@ export class CommandHandler {
         rep += `\n`;
       }
 
-      rep += `🟢 لیست مدل‌های فعال و آماده استفاده:\n`;
+      rep += `🟢 لیست مدل‌های فعال:\n`;
       scanResult.freeModels.forEach((m, idx) => {
         rep += `${idx + 1}. ${m.id} — ${m.status}\n`;
       });
@@ -144,13 +151,15 @@ export class CommandHandler {
       return true;
     }
 
-    // ۵. دستور /models و /models-list
+    // ۵. دستور /models
     if (cmd === "/models" || cmd === "/models-list") {
       const active = await this.storage.getPrimaryModel();
       const allModels = await this.modelManager.getAllAvailableModels();
 
-      let rep = `🔮 مدل‌های متصل و آماده استفاده:\n`;
-      rep += `• مدل فعال فعلی: ${active}\n\n`;
+      let rep = `🔮 مدل‌های چت و سرچ فعال:\n`;
+      rep += `• مدل اصلی فعال: ${active}\n`;
+      rep += `• مدل سرچ عمیق: models/deep-research-max-preview-04-2026\n`;
+      rep += `• مدل سرچ سریع: gemini-2.5-flash-lite\n\n`;
 
       allModels.forEach((m, idx) => {
         rep += `${idx + 1}. ${m.name}\nشناسه: ${m.id}\n\n`;
@@ -160,26 +169,7 @@ export class CommandHandler {
       return true;
     }
 
-    // ۶. دستور /search
-    if (cmd === "/search") {
-      if (!args) {
-        await sendMessage("لطفاً عبارت مورد نظر را وارد کنید:\nمثال: /search هوش مصنوعی");
-        return true;
-      }
-      const results = await this.search.searchDuckDuckGo(args);
-      if (results.length === 0) {
-        await sendMessage("نتیجه‌ای برای جستجوی شما یافت نشد.");
-        return true;
-      }
-      let rep = `🔍 نتایج جستجو برای: ${args}\n\n`;
-      results.forEach((r, i) => {
-        rep += `${i + 1}. ${r.title}\n${r.snippet}\n${r.link}\n\n`;
-      });
-      await sendMessage(rep);
-      return true;
-    }
-
-    // ۷. دستور /browse
+    // ۶. دستور /browse
     if (cmd === "/browse") {
       if (!args || !args.startsWith("http")) {
         await sendMessage("لطفاً یک لینک معتبر ارسال کنید:\nمثال: /browse https://fa.wikipedia.org");
@@ -190,7 +180,7 @@ export class CommandHandler {
       return true;
     }
 
-    // ۸. دستورات حافظه
+    // ۷. دستورات حافظه
     if (cmd === "/memory" || cmd === "💾 حافظه من") {
       const memContext = await this.memory.getMemoryContext(userId);
       await sendMessage(`💾 اطلاعات ثبت شده از شما در حافظه من:\n\n${memContext || "هنوز نکته‌ای ثبت نشده است. در چت خودتان را معرفی کنید یا از /remind استفاده کنید."}`);
@@ -199,7 +189,7 @@ export class CommandHandler {
 
     if (cmd === "/remind") {
       if (!args) {
-        await sendMessage("لطفاً نکته مورد نظر را بنویسید:\nمثال: /remind من به یادگیری زبان علاقه دارم");
+        await sendMessage("لطفاً نکته مورد نظر را بنویسید:\nمثال: /remind من برنامه‌نویس هستم");
         return true;
       }
       await this.memory.addFact(userId, args);
@@ -214,38 +204,39 @@ export class CommandHandler {
       return true;
     }
 
-    // ۹. دستور /status
+    // ۸. دستور /status
     if (cmd === "/status") {
       const botTokenSet = !!(await this.storage.getBotToken());
       const geminiSet = !!(await this.storage.getGeminiKey());
       const activeModel = await this.storage.getPrimaryModel();
 
       const rep = `⚡ وضعیت سلامت ربات فرامرز:
-• سرویس: Cloudflare Workers (Edge Global)
+• سرویس: Cloudflare Workers
 • توکن ربات: ${botTokenSet ? 'متصل ✅' : 'ناموجود ❌'}
 • کلید Gemini: ${geminiSet ? 'فعال ✅' : 'ناموجود ❌'}
-• مدل فعال: ${activeModel}`;
+• مدل اصلی چت: ${activeModel}
+• موتور سرچ عمیق: deep-research-max
+• موتور سرچ سریع: gemini-2.5-flash-lite`;
       await sendMessage(rep);
       return true;
     }
 
-    // ۱۰. دستور /clear
+    // ۹. دستور /clear
     if (cmd === "/clear") {
       await this.storage.clearHistory(chatId);
       await sendMessage("🧹 تاریخچه مکالمه این چت پاک شد.");
       return true;
     }
 
-    // ۱۱. دستور /help و دکمه راهنما
+    // ۱۰. دستور /help
     if (cmd === "/help" || cmd === "❓ راهنما") {
       const help = `📖 راهنمای دستورات فرامرز:
 
 • /start — شروع کار و بازنشانی کیبورد
+• /search — منوی انتخاب سرچ عمیق (Deep Research) یا سرچ سریع
 • /scan — اسکن و ثبت تمام مدل‌های رایگان گوگل
 • /models — لیست تمامی مدل‌های متصل
-• /price — مشاهده قیمت‌های لحظه‌ای طلا، ارز و کریپتو
-• /research — ورود به بخش تحقیق تخصصی ۳ سطحی
-• /search <عبارت> — جستجو در وب
+• /price — مشاهده قیمت‌های لحظه‌ای بازار
 • /browse <آدرس وب> — استخراج متن صفحه اینترنتی
 • /memory — مشاهده حافظه من
 • /remind <نکته> — افزودن یادآوری به حافظه

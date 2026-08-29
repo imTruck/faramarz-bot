@@ -26,35 +26,38 @@ export class SmartChat {
     }
   }
 
-  // اجرای تحقیق ۳ سطحی
-  async executeResearch(chatId, userId, question, tierKey = "simple") {
-    const tier = CONFIG.RESEARCH_TIERS[tierKey] || CONFIG.RESEARCH_TIERS.simple;
-    const model = tier.model;
+  // اجرای سرچ اختصاصی انتخابی (عمیق با deep-research-max یا سریع با gemini-2.5-flash-lite)
+  async executeSearchMode(chatId, userId, query, modeKey = "fast") {
+    const searchConfig = CONFIG.SEARCH_MODELS[modeKey] || CONFIG.SEARCH_MODELS.fast;
+    const targetModel = searchConfig.model;
+
+    const isDeep = (modeKey === "deep");
+    const systemPrompt = isDeep 
+      ? `${CONFIG.SYSTEM_PROMPT}\n\nدستور ویژه: این یک جستجوی تحلیلی و عمیق است. با دقت تمام منابع را بررسی کن، پاسخی جامع، دسته‌بندی‌شده و موشکافانه همراه با استناد دقیق ارائه کن.`
+      : `${CONFIG.SYSTEM_PROMPT}\n\nدستور ویژه: این یک جستجوی سریع است. نکات کلیدی و اطلاعات مهم را خلاصه، مفید، روان و سریع بیان کن.`;
 
     const messages = [
-      { role: "user", content: `تحقیق جامع و دقیق درباره سوال زیر همراه با ذکر منابع معتبر:\n${question}` }
+      { role: "user", content: `جستجو و بررسی دقیق درباره:\n${query}` }
     ];
 
-    const result = await callAI(messages, { model, storage: this.storage }, CONFIG.SYSTEM_PROMPT, true);
+    const result = await callAI(messages, { model: targetModel, storage: this.storage }, systemPrompt, true);
 
     return {
-      text: `🔬 **گزارش ${tier.title}:**\n\n${result.text}`,
+      text: `${searchConfig.title}:\n\n${result.text}`,
       sources: result.sources || []
     };
   }
 
-  // پردازش اصلی پیام چت به صورت تک‌مرحله‌ای و فوق‌سریع
+  // پردازش اصلی پیام چت به صورت تک‌مرحله‌ای با زنجیره مدل‌های Flash
   async processMessage(chatId, userId, userMessage, senderName = "کاربر") {
-    // ۱. استخراج اطلاعات هویتی
     this.autoExtractFacts(userId, userMessage).catch(() => {});
 
-    // ۲. پاسخ آنی به قیمت‌ها از کش (کمتر از ۱۰ میلی‌ثانیه)
+    // بررسی سریع قیمت‌ها
     const livePriceCheck = await this.liveInfo.checkQuickTriggers(userMessage);
     if (livePriceCheck.isHandled) {
       return { text: livePriceCheck.response, sources: [] };
     }
 
-    // ۳. بارگذاری تاریخچه (محدود به ۶ پیام آخر جهت کاهش چشمگیر تأخیر)
     const [history, userMemory, primaryModel] = await Promise.all([
       this.storage.getHistory(chatId),
       this.memory.getMemoryContext(userId),
@@ -73,7 +76,6 @@ ${userMemory || "ندارد"}`;
       { role: "user", content: `${senderName}: ${userMessage}` }
     ];
 
-    // ۴. فراخوانی تک‌مرحله‌ای هوش مصنوعی همراه با Google Grounding خودکار
     let result = { text: "", sources: [] };
     try {
       result = await callAI(messages, {
@@ -81,10 +83,9 @@ ${userMemory || "ندارد"}`;
         storage: this.storage
       }, dynamicSystemPrompt, true);
     } catch (err) {
-      result.text = `رفیق متاسفانه یک لحظه ارتباط با سرور هوش مصنوعی قطع شد (${err.message})، دوباره بفرست در خدمتم!`;
+      result.text = `رفیق متاسفانه ارتباط با سرور هوش مصنوعی برقرار نشد (${err.message})، دوباره بفرست در خدمتم!`;
     }
 
-    // ۵. ذخیره در تاریخچه
     history.push({ role: "user", content: userMessage });
     history.push({ role: "assistant", content: result.text });
     this.storage.saveHistory(chatId, history).catch(() => {});

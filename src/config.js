@@ -4,10 +4,7 @@ export const CONFIG = {
   OWNER_ID: 6695218234,
   OWNER_USERNAME: "Bxiqm",
 
-  // سریع‌ترین مدل پیش‌فرض
-  FAST_SEARCH_MODEL: "gemini-3.7-flash",
-
-  // زنجیره اولویت دقیق مدل‌ها با سوییچ خودکار (Failover Chain)
+  // زنجیره اولویت دقیق مدل‌های چت (چیدمان به ترتیب درخواست)
   DEFAULT_FALLBACK_CHAIN: [
     "gemini-3.7-flash",
     "gemini-3.6-flash",
@@ -19,6 +16,22 @@ export const CONFIG = {
     "gemini-1.5-flash"
   ],
 
+  // مدل‌های اختصاصی دوگانه برای سرچ و پژوهش
+  SEARCH_MODELS: {
+    deep: {
+      id: "deep",
+      title: "🚀 سرچ طولانی و با جزئیات کامل (عمیق)",
+      model: "models/deep-research-max-preview-04-2026",
+      desc: "تحلیل جامع، استخراج موشکافانه و استناد دقیق به منابع وب"
+    },
+    fast: {
+      id: "fast",
+      title: "⚡ سرچ سریع و فوری (خلاصه)",
+      model: "gemini-2.5-flash-lite",
+      desc: "پاسخ فوق‌سریع در کسری از ثانیه همراه با منابع کلیدی"
+    }
+  },
+
   // لیست مدل‌های قابل انتخاب در پنل مدیریت
   GEMINI_MODELS: [
     { id: "gemini-3.7-flash", name: "⚡ Gemini 3.7 Flash (اولویت ۱)" },
@@ -26,32 +39,11 @@ export const CONFIG = {
     { id: "gemini-3.5-flash", name: "⚡ Gemini 3.5 Flash (اولویت ۳)" },
     { id: "gemini-3.5-flash-lite", name: "🪶 Gemini 3.5 Flash Lite (اولویت ۴)" },
     { id: "gemini-3.1-flash-lite", name: "🪶 Gemini 3.1 Flash Lite (اولویت ۵)" },
+    { id: "models/deep-research-max-preview-04-2026", name: "🚀 Deep Research Max (سرچ عمیق)" },
+    { id: "gemini-2.5-flash-lite", name: "⚡ Gemini 2.5 Flash Lite (سرچ سریع)" },
     { id: "gemini-2.5-flash", name: "⚡ Gemini 2.5 Flash (پشتیبان)" },
-    { id: "gemini-2.0-flash", name: "⚡ Gemini 2.0 Flash (پشتیبان)" },
-    { id: "gemini-1.5-flash", name: "⚡ Gemini 1.5 Flash (پشتیبان)" }
+    { id: "gemini-2.0-flash", name: "⚡ Gemini 2.0 Flash (پشتیبان)" }
   ],
-
-  // سطوح سه‌گانه تحقیق
-  RESEARCH_TIERS: {
-    simple: {
-      id: "simple",
-      title: "⚡ تحقیق ساده",
-      model: "gemini-3.7-flash",
-      desc: "پاسخ‌های سریع و روزمره"
-    },
-    strong: {
-      id: "strong",
-      title: "🔬 تحقیق قوی",
-      model: "gemini-3.6-flash",
-      desc: "تحلیل مقایسه‌ای و چندمنبعی"
-    },
-    max: {
-      id: "max",
-      title: "🚀 تحقیق خیلی قوی",
-      model: "gemini-3.5-flash",
-      desc: "بررسی جامع و عمیق دانشگاهی"
-    }
-  },
 
   SYSTEM_PROMPT: `تو «فرامرز» هستی؛ یک رفیق باهوش، صمیمی، کاربلد و مشتی ایرانی.
 لحن تو کاملاً خودمانی، دوستانه و در عین حال آگاهانه و محترمانه است.
