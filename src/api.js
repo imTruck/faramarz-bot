@@ -8,20 +8,11 @@ export async function callAI(messages, config, systemPrompt, enableSearch = true
     throw new Error("کلید Gemini در دسترس نیست.");
   }
 
-  // مدل‌های فعال و زنده
-  const provenModels = [
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-pro"
-  ];
-
+  // اولویت دقیق مدل‌ها بر اساس تنظیمات اصلی
   const primary = model || CONFIG.DEFAULT_FALLBACK_CHAIN[0];
   const candidateModels = [
     primary,
-    ...CONFIG.DEFAULT_FALLBACK_CHAIN.filter(m => m !== primary),
-    ...provenModels.filter(m => m !== primary && !CONFIG.DEFAULT_FALLBACK_CHAIN.includes(m))
+    ...CONFIG.DEFAULT_FALLBACK_CHAIN.filter(m => m !== primary)
   ];
 
   const uniqueModels = [...new Set(candidateModels)];
@@ -118,22 +109,17 @@ export async function callVision(imageDataUri, userPrompt, config, systemPrompt)
   const geminiKey = await storage.getGeminiKey();
   if (!geminiKey) throw new Error("کلید Gemini تنظیم نشده است.");
 
-  const visionModels = [
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-2.5-flash",
-    "gemini-1.5-pro"
-  ];
-
+  // استفاده دقیق از همان زنجیره مدل‌های اصلی برای تحلیل تصویر
+  const candidateModels = CONFIG.DEFAULT_FALLBACK_CHAIN;
   const matches = imageDataUri.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
-  if (!matches) throw new Error("فرمت دیتای تصویر ارسالی نامعتبر است.");
+  if (!matches) throw new Error("فرمت دیتای تصویر نامعتبر است.");
 
   const mimeType = matches[1];
   const base64Data = matches[2];
 
   let lastVisionError = null;
 
-  for (const targetModel of visionModels) {
+  for (const targetModel of candidateModels) {
     const cleanModel = targetModel.replace(/^models\//, "");
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${geminiKey}`;
 
@@ -149,7 +135,7 @@ export async function callVision(imageDataUri, userPrompt, config, systemPrompt)
               }
             },
             {
-              text: userPrompt || "این تصویر را با دقت کامل بررسی کن و متون و جزئیات آن را بخوان."
+              text: userPrompt || "این تصویر را با دقت کامل بررسی کن و تمام متون، اعداد و جزئیات آن را به فارسی روان و صمیمی توضیح بده."
             }
           ]
         }
