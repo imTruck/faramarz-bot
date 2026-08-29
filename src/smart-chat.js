@@ -13,37 +13,31 @@ export class SmartChat {
     this.modelManager = new ModelManager(storage);
   }
 
-  // تشخیص هوشمند قصد تحقیق/سرچ و استخراج خودکار موضوع
+  // تشخیص دقیق و صرفاً صریح قصد تحقیق/سرچ
   detectSearchIntent(text) {
     if (!text) return null;
     const clean = text.trim();
 
-    // الگوهای رایج درخواست تحقیق در زبان فارسی
-    // مثال: "راجب قاسم سلیمانی تحقیق کن"، "درباره هوش مصنوعی سرچ کن"، "تحقیق کن درباره بیتکوین"
-    const patterns = [
-      /(?:راجب|درباره|در\s+مورد|درخصوص)\s+(.+?)\s+(?:تحقیق\s+کن|سرچ\s+کن|جستجو\s+کن|بگو|توضیح\s+بده|اطلاعات\s+بده)/i,
+    // فقط الگوهای کاملاً صریح تحقیق/سرچ
+    const explicitPatterns = [
+      /(?:راجب|درباره|در\s+مورد|درخصوص)\s+(.+?)\s+(?:تحقیق\s+کن|سرچ\s+کن|جستجو\s+کن)/i,
       /(?:تحقیق\s+کن|سرچ\s+کن|جستجو\s+کن)\s+(?:راجب|درباره|در\s+مورد)\s+(.+)/i,
       /(?:تحقیق\s+کن|سرچ\s+کن|جستجو\s+کن)\s+(?:رو|روی|درمورد)\s+(.+)/i,
-      /(?:تحقیق|سرچ|جستجو)\s+(?:درباره|راجب|در\s+مورد)\s+(.+)/i
+      /^(?:تحقیق|سرچ|جستجو)\s+(?:درباره|راجب|در\s+مورد)\s+(.+)/i,
+      /^(?:تحقیق\s+درباره|سرچ\s+درباره)\s+(.+)/i
     ];
 
-    for (const pattern of patterns) {
+    for (const pattern of explicitPatterns) {
       const match = clean.match(pattern);
       if (match && match[1]) {
         return match[1].replace(/[؟!.,،]+/g, "").trim();
       }
     }
 
-    // اگر پیام مستقیماً با "تحقیق" یا "سرچ" شروع شد
-    if (/^(?:تحقیق|سرچ|جستجو)\s+(.+)/i.test(clean)) {
-      const match = clean.match(/^(?:تحقیق|سرچ|جستجو)\s+(.+)/i);
-      if (match && match[1]) return match[1].trim();
-    }
-
     return null;
   }
 
-  // استخراج نام و فکت‌ها
+  // استخراج خودکار فکت‌ها در چت
   async autoExtractFacts(userId, text) {
     if (!text) return;
     const nameMatch = text.match(/(?:من|اسمم|نامم)\s+([آ-یa-zA-Z]+)\s+(?:هستم|هست|بودم)/);
@@ -56,7 +50,7 @@ export class SmartChat {
     }
   }
 
-  // اجرای سرچ با مدل انتخابی کاربر
+  // اجرای سرچ انتخابی کاربر با ۲ مدل مشخص شده
   async executeSearchMode(chatId, userId, query, modeKey = "fast") {
     const isDeep = (modeKey === "deep");
     const targetModel = isDeep 
@@ -64,17 +58,18 @@ export class SmartChat {
       : "gemini-2.5-flash-lite";
 
     const title = isDeep 
-      ? "🚀 گزارش تحقیق عمیق و جامع (Deep Research Max)" 
-      : "⚡ گزارش تحقیق سریع (Gemini 2.5 Flash Lite)";
+      ? "🚀 گزارش سرچ عمیق (Deep Research Max)" 
+      : "⚡ گزارش سرچ سریع (Gemini 2.5 Flash Lite)";
 
     const systemPrompt = isDeep 
-      ? `${CONFIG.SYSTEM_PROMPT}\n\nدستور ویژه: این یک تحقیق عمیق و موشکافانه است. تمام جوانب موضوع، حقایق کلیدی، پیشینه، آمارها و تحلیل‌های مرتبط را به همراه مراجع کامل بنویس.`
+      ? `${CONFIG.SYSTEM_PROMPT}\n\nدستور ویژه: این یک تحقیق عمیق و موشکافانه است. تمام جوانب موضوع، حقایق کلیدی، پیشینه، آمارها و تحلیل‌های مرتبط را به همراه مراجع کامل وب بنویس.`
       : `${CONFIG.SYSTEM_PROMPT}\n\nدستور ویژه: این یک تحقیق سریع است. نکات مهم، خلاصه ماجرا و اطلاعات اساسی را روان، صمیمی و سریع بنویس.`;
 
     const messages = [
       { role: "user", content: `تحقیق و بررسی کامل درباره موضوع زیر:\n${query}` }
     ];
 
+    // در حالت سرچ، ابزار جستجوی گوگل فعال است
     const result = await callAI(messages, { model: targetModel, storage: this.storage }, systemPrompt, true);
 
     return {
@@ -85,11 +80,11 @@ export class SmartChat {
     };
   }
 
-  // پردازش اصلی چت متنی عادی با زنجیره اولویت Flash
+  // پردازش مکالمه و چت ساده با زنجیره ۵ مدل Flash (بدون تاخیر سرچ و کاملاً سریع)
   async processMessage(chatId, userId, userMessage, senderName = "کاربر") {
     this.autoExtractFacts(userId, userMessage).catch(() => {});
 
-    // پاسخ به قیمت‌ها
+    // پاسخ آنی به قیمت‌های لحظه‌ای
     const livePriceCheck = await this.liveInfo.checkQuickTriggers(userMessage);
     if (livePriceCheck.isHandled) {
       return { text: livePriceCheck.response, sources: [] };
@@ -115,10 +110,11 @@ ${userMemory || "ندارد"}`;
 
     let result = { text: "", sources: [] };
     try {
+      // در صحبت ساده، سرچ گوگل خاموش است تا پاسخ فوق‌سریع و مستقیم داده شود
       result = await callAI(messages, {
         model: primaryModel,
         storage: this.storage
-      }, dynamicSystemPrompt, true);
+      }, dynamicSystemPrompt, false);
     } catch (err) {
       result.text = `رفیق متاسفانه ارتباط با سرور هوش مصنوعی برقرار نشد (${err.message})، دوباره بفرست در خدمتم!`;
     }

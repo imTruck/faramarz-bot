@@ -1,240 +1,152 @@
 import { CONFIG } from './config.js';
 
-// کش درون‌حافظه‌ای جهت پایداری در صورتی که بایندینگ KV متصل نشده باشد
-if (!globalThis.__MEMORY_STORE__) {
-  globalThis.__MEMORY_STORE__ = new Map();
-}
-
 export class StorageService {
   constructor(env) {
-    this.kv = env?.KV_STORAGE || null;
     this.env = env || {};
-    this.mem = globalThis.__MEMORY_STORE__;
+    this.kv = this.env.KV_STORAGE || null;
+
+    if (!globalThis.__MEMORY_STORE__) {
+      globalThis.__MEMORY_STORE__ = new Map();
+    }
+    this.memory = globalThis.__MEMORY_STORE__;
   }
 
-  // دریافت توکن تلگرام با اولویت اول KV، سپس حافظه داخلی و سپس متغیرهای محیطی
+  // گرفتن کلید KV با لایه فال‌بک امن
+  async get(key) {
+    try {
+      if (this.kv) {
+        const val = await this.kv.get(key);
+        if (val !== null && val !== undefined) return val;
+      }
+    } catch (e) {}
+    return this.memory.get(key) || null;
+  }
+
+  // ذخیره کلید در KV و حافظه
+  async put(key, value, options = {}) {
+    this.memory.set(key, value);
+    try {
+      if (this.kv) {
+        await this.kv.put(key, value, options);
+      }
+    } catch (e) {}
+  }
+
+  // حذف کلید
+  async delete(key) {
+    this.memory.delete(key);
+    try {
+      if (this.kv) {
+        await this.kv.delete(key);
+      }
+    } catch (e) {}
+  }
+
+  // توکن بات تلگرام
   async getBotToken() {
-    if (this.kv) {
-      try {
-        const token = await this.kv.get("bot:token");
-        if (token && token.trim() !== "") return token.trim();
-      } catch (e) {}
-    }
-    if (this.mem.has("bot:token")) {
-      return this.mem.get("bot:token");
-    }
-    const envToken = this.env.BOT_TOKEN || 
-                     this.env.TELEGRAM_BOT_TOKEN || 
-                     this.env.TELEGRAM_TOKEN || 
-                     this.env.TOKEN || 
-                     this.env.bot_token ||
-                     this.env.telegram_bot_token;
-    return envToken ? String(envToken).trim() : null;
+    if (this.env.BOT_TOKEN) return this.env.BOT_TOKEN.trim();
+    return await this.get("bot:token");
   }
 
-  // دریافت کلید Gemini
-  async getGeminiKey() {
-    if (this.kv) {
-      try {
-        const key = await this.kv.get("gemini:key");
-        if (key && key.trim() !== "") return key.trim();
-      } catch (e) {}
-    }
-    if (this.mem.has("gemini:key")) {
-      return this.mem.get("gemini:key");
-    }
-    const envKey = this.env.GEMINI_API_KEY || 
-                   this.env.GEMINI_KEY || 
-                   this.env.GEMINI || 
-                   this.env.gemini_api_key ||
-                   this.env.gemini_key;
-    return envKey ? String(envKey).trim() : null;
-  }
-
-  // دریافت مدل پیش‌فرض/فعال
-  async getPrimaryModel() {
-    if (this.kv) {
-      try {
-        const model = await this.kv.get("config:primary_model");
-        if (model && model.trim() !== "") return model.trim();
-      } catch (e) {}
-    }
-    if (this.mem.has("config:primary_model")) {
-      return this.mem.get("config:primary_model");
-    }
-    return this.env.DEFAULT_GEMINI_MODEL || CONFIG.GEMINI_MODELS[0].id;
-  }
-
-  // تنظیم کلید Gemini
-  async setGeminiKey(key) {
-    const cleanKey = key.trim();
-    this.mem.set("gemini:key", cleanKey);
-    if (this.kv) {
-      try {
-        if (cleanKey.toLowerCase() === "off") {
-          await this.kv.delete("gemini:key");
-          this.mem.delete("gemini:key");
-          return "حذف شد";
-        }
-        await this.kv.put("gemini:key", cleanKey);
-      } catch (e) {}
-    }
-    return cleanKey.slice(0, 6) + "..." + cleanKey.slice(-4);
-  }
-
-  // تنظیم توکن تلگرام (با نرمال‌سازی خودکار و حذف پیشوند bot اضافی)
   async setBotToken(token) {
-    let cleanToken = token.trim().replace(/^bot/i, "").trim();
-    this.mem.set("bot:token", cleanToken);
-    if (this.kv) {
-      try {
-        if (cleanToken.toLowerCase() === "off") {
-          await this.kv.delete("bot:token");
-          this.mem.delete("bot:token");
-          return "حذف شد";
-        }
-        await this.kv.put("bot:token", cleanToken);
-      } catch (e) {}
-    }
-    return cleanToken.slice(0, 6) + "..." + cleanToken.slice(-4);
+    const clean = token.replace(/^bot/i, "").trim();
+    await this.put("bot:token", clean);
+    return clean.slice(0, 6) + "..." + clean.slice(-4);
   }
 
-  // مدیریت تاریخچه پیام‌ها
+  // کلید Gemini API
+  async getGeminiKey() {
+    if (this.env.GEMINI_API_KEY) return this.env.GEMINI_API_KEY.trim();
+    return await this.get("gemini:key");
+  }
+
+  async setGeminiKey(key) {
+    const clean = key.trim();
+    await this.put("gemini:key", clean);
+    return clean.slice(0, 6) + "..." + clean.slice(-4);
+  }
+
+  // مدل پیش‌فرض چت
+  async getPrimaryModel() {
+    if (this.env.DEFAULT_GEMINI_MODEL) return this.env.DEFAULT_GEMINI_MODEL.trim();
+    const stored = await this.get("gemini:primary_model");
+    return stored || CONFIG.DEFAULT_FALLBACK_CHAIN[0];
+  }
+
+  async setPrimaryModel(modelId) {
+    await this.put("gemini:primary_model", modelId);
+    return modelId;
+  }
+
+  // تاریخچه چت
   async getHistory(chatId) {
-    if (this.kv) {
-      try {
-        const raw = await this.kv.get(`history:${chatId}`);
-        if (raw) return JSON.parse(raw);
-      } catch (e) {}
+    const data = await this.get(`chat:${chatId}:history`);
+    if (!data) return [];
+    try {
+      return JSON.parse(data);
+    } catch {
+      return [];
     }
-    return this.mem.get(`history:${chatId}`) || [];
   }
 
   async saveHistory(chatId, history) {
     const trimmed = history.slice(-CONFIG.MAX_HISTORY_LENGTH);
-    this.mem.set(`history:${chatId}`, trimmed);
-    if (this.kv) {
-      try {
-        await this.kv.put(`history:${chatId}`, JSON.stringify(trimmed), {
-          expirationTtl: CONFIG.HISTORY_TTL_SECONDS
-        });
-      } catch (e) {}
-    }
+    await this.put(`chat:${chatId}:history`, JSON.stringify(trimmed), {
+      expirationTtl: CONFIG.HISTORY_TTL_SECONDS
+    });
   }
 
   async clearHistory(chatId) {
-    this.mem.delete(`history:${chatId}`);
-    if (this.kv) {
-      try {
-        await this.kv.delete(`history:${chatId}`);
-      } catch (e) {}
-    }
+    await this.delete(`chat:${chatId}:history`);
   }
 
-  // مدیریت وضعیت موقت کاربر (State)
-  async setState(userId, state) {
-    this.mem.set(`state:${userId}`, state);
-    if (this.kv) {
-      try {
-        await this.kv.put(`state:${userId}`, state, {
-          expirationTtl: CONFIG.STATE_TTL_SECONDS
-        });
-      } catch (e) {}
-    }
-  }
-
+  // وضعیت کاربر (State)
   async getState(userId) {
-    if (this.kv) {
-      try {
-        const s = await this.kv.get(`state:${userId}`);
-        if (s) return s;
-      } catch (e) {}
-    }
-    return this.mem.get(`state:${userId}`) || null;
+    return await this.get(`user:${userId}:state`);
+  }
+
+  async setState(userId, state) {
+    await this.put(`user:${userId}:state`, state, {
+      expirationTtl: CONFIG.STATE_TTL_SECONDS
+    });
   }
 
   async clearState(userId) {
-    this.mem.delete(`state:${userId}`);
-    if (this.kv) {
-      try {
-        await this.kv.delete(`state:${userId}`);
-      } catch (e) {}
-    }
+    await this.delete(`user:${userId}:state`);
   }
 
-  // ذخیره و دریافت کاربران
+  // هویت کاربر
   async saveUserIdentity(user) {
-    if (!user?.id) return;
-    const key = `user-identity:${user.id}`;
-    const payload = {
+    if (!user || !user.id) return;
+    const key = `user:${user.id}:identity`;
+    const payload = JSON.stringify({
       id: user.id,
-      first_name: user.first_name || "",
+      first_name: user.first_name,
       last_name: user.last_name || "",
-      username: user.username ? `@${user.username}` : "ندارد",
+      username: user.username || "",
       last_seen: new Date().toISOString()
-    };
-    this.mem.set(key, payload);
-    if (this.kv) {
-      try {
-        await this.kv.put(key, JSON.stringify(payload));
-      } catch (e) {}
-    }
+    });
+    await this.put(key, payload);
   }
 
-  async listUsers(limit = 50) {
-    if (this.kv) {
-      try {
-        const list = await this.kv.list({ prefix: "user-identity:", limit });
-        const users = [];
-        for (const key of list.keys) {
-          const data = await this.kv.get(key.name);
-          if (data) users.push(JSON.parse(data));
-        }
-        if (users.length > 0) return users;
-      } catch (e) {}
-    }
-    const memUsers = [];
-    for (const [k, v] of this.mem.entries()) {
-      if (k.startsWith("user-identity:")) memUsers.push(v);
-    }
-    return memUsers;
-  }
-
-  // لاگ‌ها
+  // سیستم لاگ ورکر
   async addLog(message) {
-    const logItem = { time: new Date().toISOString(), message };
-    const cur = this.mem.get("system:logs") || [];
-    cur.push(logItem);
-    this.mem.set("system:logs", cur.slice(-50));
-
-    if (this.kv) {
-      try {
-        const logsRaw = await this.kv.get("system:logs");
-        const logs = logsRaw ? JSON.parse(logsRaw) : [];
-        logs.push(logItem);
-        await this.kv.put("system:logs", JSON.stringify(logs.slice(-50)), {
-          expirationTtl: 7 * 24 * 60 * 60
-        });
-      } catch (e) {}
-    }
+    const logs = await this.getLogs();
+    logs.push({
+      timestamp: new Date().toISOString(),
+      message
+    });
+    const trimmed = logs.slice(-50);
+    await this.put("system:logs", JSON.stringify(trimmed));
   }
 
   async getLogs() {
-    if (this.kv) {
-      try {
-        const logsRaw = await this.kv.get("system:logs");
-        if (logsRaw) return JSON.parse(logsRaw);
-      } catch (e) {}
-    }
-    return this.mem.get("system:logs") || [];
-  }
-
-  async clearLogs() {
-    this.mem.delete("system:logs");
-    if (this.kv) {
-      try {
-        await this.kv.delete("system:logs");
-      } catch (e) {}
+    const data = await this.get("system:logs");
+    if (!data) return [];
+    try {
+      return JSON.parse(data);
+    } catch {
+      return [];
     }
   }
 }
